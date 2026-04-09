@@ -1,7 +1,7 @@
 use anyhow::Result;
 use intern::traits::{
     AgentOutput, AgentRunner, Event, EventSink, Issue, IssueTracker, RemoteClient, RunConfig,
-    VcsClient,
+    SourceControl,
 };
 
 // --- Fake adapters for testing ---
@@ -36,15 +36,15 @@ impl IssueTracker for FakeIssueTracker {
     }
 }
 
-struct FakeVcsClient;
-impl VcsClient for FakeVcsClient {
+struct FakeSourceControl;
+impl SourceControl for FakeSourceControl {
     fn create_branch(&self, _name: &str) -> Result<()> {
         Ok(())
     }
     fn current_branch(&self) -> Result<String> {
         Ok("main".to_string())
     }
-    fn diff_from_main(&self) -> Result<String> {
+    fn diff_from_base(&self, _base: &str) -> Result<String> {
         Ok(String::new())
     }
     fn stage(&self, _paths: Option<&[&str]>) -> Result<()> {

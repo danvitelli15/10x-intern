@@ -54,10 +54,10 @@ pub trait IssueTracker {
     fn create_child_issue(&self, parent_id: u64, title: &str, body: &str) -> Result<Issue>;
 }
 
-pub trait VcsClient {
+pub trait SourceControl {
     fn create_branch(&self, name: &str) -> Result<()>;
     fn current_branch(&self) -> Result<String>;
-    fn diff_from_main(&self) -> Result<String>;
+    fn diff_from_base(&self, base: &str) -> Result<String>;
     /// Stage files before committing.
     /// `None` stages everything (`git add -A`).
     /// `Some(paths)` stages only the specified paths.

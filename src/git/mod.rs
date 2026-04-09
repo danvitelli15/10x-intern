@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::traits::{CommandRunner, VcsClient};
+use crate::traits::{CommandRunner, SourceControl};
 
 pub struct GitClient {
     runner: Box<dyn CommandRunner>,
@@ -12,7 +12,7 @@ impl GitClient {
     }
 }
 
-impl VcsClient for GitClient {
+impl SourceControl for GitClient {
     fn create_branch(&self, name: &str) -> Result<()> {
         self.runner.run("git", &["switch", "-c", name])?;
         Ok(())
@@ -25,8 +25,8 @@ impl VcsClient for GitClient {
         Ok(output.trim().to_string())
     }
 
-    fn diff_from_main(&self) -> Result<String> {
-        self.runner.run("git", &["diff", "main...HEAD"])
+    fn diff_from_base(&self, base: &str) -> Result<String> {
+        self.runner.run("git", &["diff", &format!("{}...HEAD", base)])
     }
 
     fn stage(&self, paths: Option<&[&str]>) -> Result<()> {
@@ -82,13 +82,14 @@ mod tests {
     }
 
     #[test]
-    fn diff_from_main_returns_output() {
+    fn diff_from_base_returns_output() {
         let diff = "diff --git a/src/main.rs b/src/main.rs\n+fn hello() {}";
-        let (client, _) = adapter(diff);
+        let (client, calls) = adapter(diff);
 
-        let result = client.diff_from_main().unwrap();
+        let result = client.diff_from_base("main").unwrap();
 
         assert_eq!(result, diff);
+        assert!(calls.borrow()[0].contains(&"main...HEAD".to_string()));
     }
 
     #[test]

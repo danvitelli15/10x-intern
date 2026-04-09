@@ -1,10 +1,10 @@
 use anyhow::Result;
 
-use crate::traits::{AgentRunner, EventSink, IssueTracker, RemoteClient, RunConfig, VcsClient};
+use crate::traits::{AgentRunner, EventSink, IssueTracker, RemoteClient, RunConfig, SourceControl};
 
 pub struct Orchestrator {
     issues: Box<dyn IssueTracker>,
-    vcs: Box<dyn VcsClient>,
+    vcs: Box<dyn SourceControl>,
     remote: Box<dyn RemoteClient>,
     runner: Box<dyn AgentRunner>,
     events: Box<dyn EventSink>,
@@ -13,7 +13,7 @@ pub struct Orchestrator {
 impl Orchestrator {
     pub fn new(
         issues: Box<dyn IssueTracker>,
-        vcs: Box<dyn VcsClient>,
+        vcs: Box<dyn SourceControl>,
         remote: Box<dyn RemoteClient>,
         runner: Box<dyn AgentRunner>,
         events: Box<dyn EventSink>,
