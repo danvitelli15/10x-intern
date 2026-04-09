@@ -1,4 +1,3 @@
-mod client;
 pub mod types;
 
 use anyhow::Result;
