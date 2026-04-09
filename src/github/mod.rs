@@ -188,38 +188,15 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    // Returns canned output — used when we only care about parsing, not what was called.
-    struct FakeCommandRunner {
-        response: String,
-    }
-
-    impl FakeCommandRunner {
-        fn new(response: &str) -> Self {
-            Self {
-                response: response.to_string(),
-            }
-        }
-    }
-
-    impl CommandRunner for FakeCommandRunner {
-        fn run(&self, _program: &str, _args: &[&str]) -> Result<String> {
-            Ok(self.response.clone())
-        }
-    }
-
-    fn adapter(response: &str) -> GithubAdapter {
-        GithubAdapter::new("owner/repo", Box::new(FakeCommandRunner::new(response)))
-    }
-
-    // Records every command that was run — used when we care about what args were passed.
+    // Single test double: returns a canned response and records every call.
     // Rc<RefCell<...>>: Rc lets the test and the runner share ownership of the vec;
     // RefCell lets us mutate it through a shared reference (needed because CommandRunner::run takes &self).
-    struct RecordingCommandRunner {
+    struct FakeCommandRunner {
         calls: Rc<RefCell<Vec<Vec<String>>>>,
         response: String,
     }
 
-    impl CommandRunner for RecordingCommandRunner {
+    impl CommandRunner for FakeCommandRunner {
         fn run(&self, program: &str, args: &[&str]) -> Result<String> {
             let mut call = vec![program.to_string()];
             call.extend(args.iter().map(|s| s.to_string()));
@@ -228,19 +205,18 @@ mod tests {
         }
     }
 
-    fn recording_adapter(response: &str) -> (GithubAdapter, Rc<RefCell<Vec<Vec<String>>>>) {
+    fn adapter(response: &str) -> (GithubAdapter, Rc<RefCell<Vec<Vec<String>>>>) {
         let calls = Rc::new(RefCell::new(vec![]));
-        let runner = RecordingCommandRunner {
+        let runner = FakeCommandRunner {
             calls: calls.clone(),
             response: response.to_string(),
         };
-        let adapter = GithubAdapter::new("owner/repo", Box::new(runner));
-        (adapter, calls)
+        (GithubAdapter::new("owner/repo", Box::new(runner)), calls)
     }
 
     #[test]
     fn claim_issue_posts_comment() {
-        let (adapter, calls) = recording_adapter("");
+        let (adapter, calls) = adapter("");
 
         adapter.claim_issue(42).unwrap();
 
@@ -263,7 +239,8 @@ mod tests {
             {"number": 2, "title": "Second", "body": "body two", "labels": [{"name": "aft"}, {"name": "bug"}]}
         ]"#;
 
-        let issues = adapter(json).get_issues_by_label("aft").unwrap();
+        let (adapter, _) = adapter(json);
+        let issues = adapter.get_issues_by_label("aft").unwrap();
 
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0].id, 1);
@@ -272,7 +249,7 @@ mod tests {
 
     #[test]
     fn complete_issue_adds_label() {
-        let (adapter, calls) = recording_adapter("");
+        let (adapter, calls) = adapter("");
 
         adapter.complete_issue(7).unwrap();
 
@@ -287,7 +264,7 @@ mod tests {
 
     #[test]
     fn skip_issue_adds_hitl_label() {
-        let (adapter, calls) = recording_adapter("");
+        let (adapter, calls) = adapter("");
 
         adapter.skip_issue(9).unwrap();
 
@@ -300,7 +277,7 @@ mod tests {
 
     #[test]
     fn post_comment_sends_body() {
-        let (adapter, calls) = recording_adapter("");
+        let (adapter, calls) = adapter("");
 
         adapter.post_comment(5, "hello from the agent").unwrap();
 
@@ -314,7 +291,7 @@ mod tests {
     #[test]
     fn create_child_issue_creates_and_links() {
         let url = "https://github.com/owner/repo/issues/99\n";
-        let (adapter, calls) = recording_adapter(url);
+        let (adapter, calls) = adapter(url);
 
         let issue = adapter
             .create_child_issue(1, "Child title", "Child body")
@@ -343,7 +320,8 @@ mod tests {
             {"number": 11, "title": "Sub two", "body": "body", "labels": [{"name": "aft"}]}
         ]"#;
 
-        let issues = adapter(json).get_children(5).unwrap();
+        let (adapter, _) = adapter(json);
+        let issues = adapter.get_children(5).unwrap();
 
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0].id, 10);
@@ -353,7 +331,7 @@ mod tests {
     #[test]
     fn create_pr_returns_url() {
         let url = "https://github.com/owner/repo/pull/5\n";
-        let (adapter, calls) = recording_adapter(url);
+        let (adapter, calls) = adapter(url);
 
         let result = adapter
             .create_pr("My PR", "PR body", "feature/123")
@@ -377,7 +355,8 @@ mod tests {
             "labels": [{"name": "feature"}, {"name": "aft"}]
         }"#;
 
-        let issue = adapter(json).get_issue(42).unwrap();
+        let (adapter, _) = adapter(json);
+        let issue = adapter.get_issue(42).unwrap();
 
         assert_eq!(issue.id, 42);
         assert_eq!(issue.title, "Add user authentication");
