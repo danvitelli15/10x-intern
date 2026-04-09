@@ -1,3 +1,12 @@
+use clap::Parser;
+
+#[derive(Parser)]
+struct Arguments {
+    mode: String,
+}
+
 fn main() {
-    println!("Hello, world!");
+    let args = Arguments::parse();
+
+    println!("Hello, world! Mode: {}", args.mode);
 }
