@@ -73,3 +73,7 @@ pub trait AgentRunner {
 pub trait EventSink {
     fn emit(&self, event: Event);
 }
+
+pub trait CommandRunner {
+    fn run(&self, program: &str, args: &[&str]) -> Result<String>;
+}
