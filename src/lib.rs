@@ -6,3 +6,6 @@ pub mod orchestrator;
 pub mod reporter;
 pub mod runner;
 pub mod traits;
+
+#[cfg(test)]
+pub mod test_utils;

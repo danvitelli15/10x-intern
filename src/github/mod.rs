@@ -185,32 +185,12 @@ impl RemoteClient for GithubAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::fake_runner;
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    // Single test double: returns a canned response and records every call.
-    // Rc<RefCell<...>>: Rc lets the test and the runner share ownership of the vec;
-    // RefCell lets us mutate it through a shared reference (needed because CommandRunner::run takes &self).
-    struct FakeCommandRunner {
-        calls: Rc<RefCell<Vec<Vec<String>>>>,
-        response: String,
-    }
-
-    impl CommandRunner for FakeCommandRunner {
-        fn run(&self, program: &str, args: &[&str]) -> Result<String> {
-            let mut call = vec![program.to_string()];
-            call.extend(args.iter().map(|s| s.to_string()));
-            self.calls.borrow_mut().push(call);
-            Ok(self.response.clone())
-        }
-    }
-
     fn adapter(response: &str) -> (GithubAdapter, Rc<RefCell<Vec<Vec<String>>>>) {
-        let calls = Rc::new(RefCell::new(vec![]));
-        let runner = FakeCommandRunner {
-            calls: calls.clone(),
-            response: response.to_string(),
-        };
+        let (runner, calls) = fake_runner(response);
         (GithubAdapter::new("owner/repo", Box::new(runner)), calls)
     }
 
