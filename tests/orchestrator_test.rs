@@ -47,6 +47,9 @@ impl VcsClient for FakeVcsClient {
     fn diff_from_main(&self) -> Result<String> {
         Ok(String::new())
     }
+    fn stage(&self, _paths: Option<&[&str]>) -> Result<()> {
+        Ok(())
+    }
     fn commit(&self, _message: &str) -> Result<()> {
         Ok(())
     }

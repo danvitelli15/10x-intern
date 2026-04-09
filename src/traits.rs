@@ -58,6 +58,10 @@ pub trait VcsClient {
     fn create_branch(&self, name: &str) -> Result<()>;
     fn current_branch(&self) -> Result<String>;
     fn diff_from_main(&self) -> Result<String>;
+    /// Stage files before committing.
+    /// `None` stages everything (`git add -A`).
+    /// `Some(paths)` stages only the specified paths.
+    fn stage(&self, paths: Option<&[&str]>) -> Result<()>;
     fn commit(&self, message: &str) -> Result<()>;
 }
 
