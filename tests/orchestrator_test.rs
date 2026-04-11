@@ -6,7 +6,7 @@ use anyhow::Result;
 use intern::cli::Command;
 use intern::config::{AgentConfig, Config, IssueTrackerConfig, RunDefaults};
 use intern::actions::implement;
-use intern::orchestrator::{complete_ticket, run, Context};
+use intern::orchestrator::{complete_series, complete_ticket, run, Context};
 use intern::traits::{
     AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
     RemoteClient, RunConfig, SourceControl,
@@ -34,7 +34,7 @@ fn run_config() -> RunConfig {
 // --- Controllable fakes ---
 
 struct FakeIssueTracker {
-    issue: Issue,
+    issues: Vec<Issue>,
     claimed: Rc<RefCell<Vec<u64>>>,
     completed: Rc<RefCell<Vec<u64>>>,
     skipped: Rc<RefCell<Vec<u64>>>,
@@ -42,22 +42,28 @@ struct FakeIssueTracker {
 
 impl FakeIssueTracker {
     fn new(issue: Issue) -> (Self, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>) {
+        Self::with_issues(vec![issue])
+    }
+
+    fn with_issues(issues: Vec<Issue>) -> (Self, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>) {
         let claimed = Rc::new(RefCell::new(vec![]));
         let completed = Rc::new(RefCell::new(vec![]));
         let skipped = Rc::new(RefCell::new(vec![]));
-        (Self { issue, claimed: claimed.clone(), completed: completed.clone(), skipped: skipped.clone() }, claimed, completed, skipped)
+        (Self { issues, claimed: claimed.clone(), completed: completed.clone(), skipped: skipped.clone() }, claimed, completed, skipped)
     }
 }
 
 impl IssueTracker for FakeIssueTracker {
-    fn get_issue(&self, _id: u64) -> Result<Issue> {
-        Ok(self.issue.clone())
+    fn get_issue(&self, id: u64) -> Result<Issue> {
+        self.issues.iter().find(|i| i.id == id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("issue {id} not found in fake"))
     }
     fn get_children(&self, _id: u64) -> Result<Vec<Issue>> {
         Ok(vec![])
     }
     fn get_issues_by_label(&self, _label: &str) -> Result<Vec<Issue>> {
-        Ok(vec![])
+        Ok(self.issues.clone())
     }
     fn claim_issue(&self, id: u64) -> Result<()> {
         self.claimed.borrow_mut().push(id);
@@ -304,4 +310,28 @@ fn complete_ticket_marks_hitl_when_budget_exhausted() {
     complete_ticket(42, &ctx).unwrap();
 
     assert!(skipped.borrow().contains(&42));
+}
+
+// --- complete_series tests ---
+
+#[test]
+fn complete_series_executes_tickets_in_plan_order_sequence() {
+    let (tracker, claimed, _, _) = FakeIssueTracker::with_issues(vec![
+        make_issue(1, vec![]),
+        make_issue(2, vec![]),
+    ]);
+    let runner = SequencedRunner::new(vec![
+        agent_success(r#"[{"id": 2}, {"id": 1}]"#),                 // plan_order
+        agent_success(""),                                           // implement issue 2
+        agent_success("<reviewResult>CLEAN</reviewResult>"),         // review issue 2
+        agent_success(""),                                           // instructions issue 2
+        agent_success(""),                                           // implement issue 1
+        agent_success("<reviewResult>CLEAN</reviewResult>"),         // review issue 1
+        agent_success(""),                                           // instructions issue 1
+    ]);
+    let ctx = make_context_sequenced(tracker, runner, 20);
+
+    complete_series("my-label", &ctx).unwrap();
+
+    assert_eq!(*claimed.borrow(), vec![2, 1]);
 }

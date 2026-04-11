@@ -1,7 +1,20 @@
 use anyhow::Result;
+use serde::Deserialize;
 
 use crate::orchestrator::Context;
 use crate::traits::Issue;
+
+#[derive(Deserialize)]
+struct OrderedItem {
+    id: u64,
+}
+
+pub fn plan_order(issues: &[Issue], ctx: &Context) -> Result<Vec<u64>> {
+    let prompt = build_plan_order_prompt(issues);
+    let output = ctx.run_agent(&prompt)?;
+    let items: Vec<OrderedItem> = serde_json::from_str(output.stdout.trim())?;
+    Ok(items.into_iter().map(|item| item.id).collect())
+}
 
 pub fn implement(issue_id: u64, ctx: &Context) -> Result<()> {
     let issue = ctx.issues.get_issue(issue_id)?;
@@ -48,6 +61,15 @@ fn build_implement_prompt(issue: &Issue) -> String {
         .replace("{{issue_id}}", &issue.id.to_string())
         .replace("{{issue_title}}", &issue.title)
         .replace("{{issue_body}}", &issue.body)
+}
+
+fn build_plan_order_prompt(issues: &[Issue]) -> String {
+    const DEFAULT: &str = include_str!("../prompts/plan_order.md");
+    let issues_list = issues.iter()
+        .map(|i| format!("### Issue #{}: {}\n{}", i.id, i.title, i.body))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    DEFAULT.replace("{{issues_list}}", &issues_list)
 }
 
 fn build_review_prompt(issue: &Issue, diff: &str) -> String {
@@ -127,6 +149,24 @@ mod tests {
             Box::new(StubEventSink),
             RunConfig { max_iterations: 10, commit_strategy: CommitStrategy::Direct, dry_run: false },
         )
+    }
+
+    #[test]
+    fn plan_order_parses_agent_json_into_ordered_ids() {
+        let issues = vec![
+            Issue { id: 1, title: "First".into(), body: "".into(), labels: vec![] },
+            Issue { id: 2, title: "Second".into(), body: "".into(), labels: vec![] },
+        ];
+        let ctx = test_context(r#"[{"id": 2}, {"id": 1}]"#);
+        let order = plan_order(&issues, &ctx).unwrap();
+        assert_eq!(order, vec![2, 1]);
+    }
+
+    #[test]
+    fn plan_order_returns_error_for_invalid_json() {
+        let issues = vec![Issue { id: 1, title: "T".into(), body: "".into(), labels: vec![] }];
+        let ctx = test_context("I think issue 2 should go first, then issue 1.");
+        assert!(plan_order(&issues, &ctx).is_err());
     }
 
     #[test]

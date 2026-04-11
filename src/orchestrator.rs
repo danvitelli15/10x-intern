@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use anyhow::Result;
 
-use crate::actions::{generate_test_instructions, implement, review};
+use crate::actions::{generate_test_instructions, implement, plan_order, review};
 use crate::cli::{Command, CommitStrategyArg};
 use crate::config::Config;
 use crate::git::GitClient;
@@ -14,6 +14,18 @@ use crate::traits::{
     AgentOutput, AgentRunner, CommitStrategy, EventSink, IssueTracker, IssueType, RemoteClient,
     RunConfig, SourceControl,
 };
+
+pub fn complete_series(label: &str, ctx: &Context) -> Result<()> {
+    let issues = ctx.issues.get_issues_by_label(label)?;
+    let ordered_ids = plan_order(&issues, ctx)?;
+    for id in ordered_ids {
+        match ctx.issues.issue_type(id)? {
+            IssueType::Ticket => complete_ticket(id, ctx)?,
+            IssueType::Feature => todo!("complete_feature"),
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 pub(crate) struct BudgetExhausted;
@@ -74,7 +86,7 @@ pub fn run(command: Command, config: Config) -> Result<()> {
     let ctx = build_context(&command, &config)?;
     match command {
         Command::Implement { issue_id, .. } => complete_ticket(issue_id, &ctx),
-        Command::Clear { .. } => todo!("complete_series"),
+        Command::Clear { label, .. } => complete_series(&label, &ctx),
         Command::Review { .. } => todo!("review"),
     }
 }
