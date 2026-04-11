@@ -2,6 +2,7 @@ use std::cell::Cell;
 
 use anyhow::Result;
 
+use crate::actions::{generate_test_instructions, implement, review};
 use crate::cli::{Command, CommitStrategyArg};
 use crate::config::Config;
 use crate::git::GitClient;
@@ -10,9 +11,20 @@ use crate::process::ProcessRunner;
 use crate::reporter::log_reporter::LogReporter;
 use crate::runner::LocalRunner;
 use crate::traits::{
-    AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
-    RemoteClient, RunConfig, SourceControl,
+    AgentOutput, AgentRunner, CommitStrategy, EventSink, IssueTracker, IssueType, RemoteClient,
+    RunConfig, SourceControl,
 };
+
+#[derive(Debug)]
+pub(crate) struct BudgetExhausted;
+
+impl std::fmt::Display for BudgetExhausted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "agent budget exhausted")
+    }
+}
+
+impl std::error::Error for BudgetExhausted {}
 
 pub struct Context {
     pub issues: Box<dyn IssueTracker>,
@@ -47,7 +59,7 @@ impl Context {
     pub fn run_agent(&self, prompt: &str) -> Result<AgentOutput> {
         let used = self.iterations_used.get();
         if used >= self.config.max_iterations {
-            anyhow::bail!("max iterations ({}) reached", self.config.max_iterations);
+            return Err(anyhow::anyhow!(BudgetExhausted));
         }
         self.iterations_used.set(used + 1);
         self.runner.run(prompt, &self.config)
@@ -61,10 +73,31 @@ impl Context {
 pub fn run(command: Command, config: Config) -> Result<()> {
     let ctx = build_context(&command, &config)?;
     match command {
-        Command::Implement { issue_id, .. } => implement(issue_id, &ctx),
+        Command::Implement { issue_id, .. } => complete_ticket(issue_id, &ctx),
         Command::Clear { .. } => todo!("complete_series"),
         Command::Review { .. } => todo!("review"),
     }
+}
+
+pub fn complete_ticket(issue_id: u64, ctx: &Context) -> Result<()> {
+    loop {
+        let result = (|| -> Result<bool> {
+            implement(issue_id, ctx)?;
+            review(issue_id, ctx)
+        })();
+
+        match result {
+            Ok(false) => break,
+            Ok(true) => continue,
+            Err(e) if e.downcast_ref::<BudgetExhausted>().is_some() => {
+                ctx.issues.skip_issue(issue_id)?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    generate_test_instructions(issue_id, ctx)?;
+    Ok(())
 }
 
 fn build_context(command: &Command, config: &Config) -> Result<Context> {
@@ -101,18 +134,12 @@ fn build_context(command: &Command, config: &Config) -> Result<Context> {
 
 fn build_run_config(command: &Command, config: &Config) -> RunConfig {
     let (dry_run, max_iterations_override, commit_strategy_override) = match command {
-        Command::Implement {
-            dry_run,
-            max_iterations,
-            commit_strategy,
-            ..
-        } => (*dry_run, *max_iterations, commit_strategy.clone()),
-        Command::Clear {
-            dry_run,
-            max_iterations,
-            commit_strategy,
-            ..
-        } => (*dry_run, *max_iterations, commit_strategy.clone()),
+        Command::Implement { dry_run, max_iterations, commit_strategy, .. } => {
+            (*dry_run, *max_iterations, commit_strategy.clone())
+        }
+        Command::Clear { dry_run, max_iterations, commit_strategy, .. } => {
+            (*dry_run, *max_iterations, commit_strategy.clone())
+        }
         Command::Review { dry_run, .. } => (*dry_run, None, None),
     };
 
@@ -134,32 +161,10 @@ fn build_run_config(command: &Command, config: &Config) -> RunConfig {
     }
 }
 
-pub fn implement(issue_id: u64, ctx: &Context) -> Result<()> {
-    let issue = ctx.issues.get_issue(issue_id)?;
-
-    if issue.labels.contains(&"hitl".to_string()) {
-        log::info!("skipping issue #{issue_id} — labeled hitl");
-        return Ok(());
-    }
-
-    ctx.issues.claim_issue(issue_id)?;
-    ctx.events.emit(Event::AgentStarted(issue_id));
-
-    let prompt = build_implement_prompt(&issue);
-    let output = ctx.run_agent(&prompt)?;
-
-    if output.success {
-        ctx.issues.complete_issue(issue_id)?;
-        ctx.events.emit(Event::IssueComplete(issue_id));
-    }
-
-    ctx.events.emit(Event::RunComplete);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traits::{CommitStrategy, Event, Issue, RunConfig};
 
     struct StubIssueTracker;
     impl IssueTracker for StubIssueTracker {
@@ -195,10 +200,10 @@ mod tests {
         fn emit(&self, _: Event) {}
     }
 
-    struct StubRunner { success: bool }
+    struct StubRunner;
     impl AgentRunner for StubRunner {
         fn run(&self, _: &str, _: &RunConfig) -> Result<AgentOutput> {
-            Ok(AgentOutput { stdout: "".into(), success: self.success })
+            Ok(AgentOutput { stdout: "".into(), success: true })
         }
     }
 
@@ -207,7 +212,7 @@ mod tests {
             Box::new(StubIssueTracker),
             Box::new(StubSourceControl),
             Box::new(StubRemoteClient),
-            Box::new(StubRunner { success: true }),
+            Box::new(StubRunner),
             Box::new(StubEventSink),
             RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false },
         )
@@ -234,19 +239,4 @@ mod tests {
         let result = ctx.run_agent("p3");
         assert!(result.is_err());
     }
-}
-
-/// Build the prompt for the implement agent.
-///
-/// Uses the embedded default prompt template. Variables injected: `{{issue_id}}`,
-/// `{{issue_title}}`, `{{issue_body}}`.
-///
-/// TODO: check for a repo-local override at `.intern/prompts/implement.md` before
-/// falling back to the embedded default. See issue #1.
-fn build_implement_prompt(issue: &Issue) -> String {
-    const DEFAULT: &str = include_str!("../prompts/implement.md");
-    DEFAULT
-        .replace("{{issue_id}}", &issue.id.to_string())
-        .replace("{{issue_title}}", &issue.title)
-        .replace("{{issue_body}}", &issue.body)
 }

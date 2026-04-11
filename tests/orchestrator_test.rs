@@ -1,10 +1,12 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use anyhow::Result;
 use intern::cli::Command;
 use intern::config::{AgentConfig, Config, IssueTrackerConfig, RunDefaults};
-use intern::orchestrator::{implement, run, Context};
+use intern::actions::implement;
+use intern::orchestrator::{complete_ticket, run, Context};
 use intern::traits::{
     AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
     RemoteClient, RunConfig, SourceControl,
@@ -35,13 +37,15 @@ struct FakeIssueTracker {
     issue: Issue,
     claimed: Rc<RefCell<Vec<u64>>>,
     completed: Rc<RefCell<Vec<u64>>>,
+    skipped: Rc<RefCell<Vec<u64>>>,
 }
 
 impl FakeIssueTracker {
-    fn new(issue: Issue) -> (Self, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>) {
+    fn new(issue: Issue) -> (Self, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>) {
         let claimed = Rc::new(RefCell::new(vec![]));
         let completed = Rc::new(RefCell::new(vec![]));
-        (Self { issue, claimed: claimed.clone(), completed: completed.clone() }, claimed, completed)
+        let skipped = Rc::new(RefCell::new(vec![]));
+        (Self { issue, claimed: claimed.clone(), completed: completed.clone(), skipped: skipped.clone() }, claimed, completed, skipped)
     }
 }
 
@@ -63,7 +67,8 @@ impl IssueTracker for FakeIssueTracker {
         self.completed.borrow_mut().push(id);
         Ok(())
     }
-    fn skip_issue(&self, _id: u64) -> Result<()> {
+    fn skip_issue(&self, id: u64) -> Result<()> {
+        self.skipped.borrow_mut().push(id);
         Ok(())
     }
     fn post_comment(&self, _id: u64, _body: &str) -> Result<()> {
@@ -115,6 +120,27 @@ impl AgentRunner for FakeRunner {
     }
 }
 
+struct SequencedRunner {
+    responses: RefCell<VecDeque<AgentOutput>>,
+}
+
+impl SequencedRunner {
+    fn new(responses: Vec<AgentOutput>) -> Self {
+        Self { responses: RefCell::new(responses.into()) }
+    }
+}
+
+impl AgentRunner for SequencedRunner {
+    fn run(&self, _prompt: &str, _config: &RunConfig) -> Result<AgentOutput> {
+        self.responses.borrow_mut().pop_front()
+            .ok_or_else(|| anyhow::anyhow!("SequencedRunner: no more responses queued"))
+    }
+}
+
+fn agent_success(stdout: &str) -> AgentOutput {
+    AgentOutput { stdout: stdout.to_string(), success: true }
+}
+
 struct FakeEventSink;
 impl EventSink for FakeEventSink {
     fn emit(&self, _event: Event) {}
@@ -131,11 +157,22 @@ fn make_context(tracker: FakeIssueTracker, runner: FakeRunner) -> Context {
     )
 }
 
+fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner, max_iterations: u32) -> Context {
+    Context::new(
+        Box::new(tracker),
+        Box::new(FakeSourceControl),
+        Box::new(FakeRemoteClient),
+        Box::new(runner),
+        Box::new(FakeEventSink),
+        RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false },
+    )
+}
+
 // --- Tests (new interface) ---
 
 #[test]
 fn implement_fn_claims_issue_before_running_agent() {
-    let (tracker, claimed, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, claimed, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, _) = FakeRunner::succeeds();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -145,7 +182,7 @@ fn implement_fn_claims_issue_before_running_agent() {
 
 #[test]
 fn implement_fn_runs_agent_with_issue_content_in_prompt() {
-    let (tracker, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, prompt) = FakeRunner::succeeds();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -158,7 +195,7 @@ fn implement_fn_runs_agent_with_issue_content_in_prompt() {
 
 #[test]
 fn implement_fn_marks_complete_when_agent_succeeds() {
-    let (tracker, _, completed) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, completed, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, _) = FakeRunner::succeeds();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -168,7 +205,7 @@ fn implement_fn_marks_complete_when_agent_succeeds() {
 
 #[test]
 fn implement_fn_skips_hitl_issues_without_running_agent() {
-    let (tracker, claimed, _) = FakeIssueTracker::new(make_issue(42, vec!["hitl"]));
+    let (tracker, claimed, _, _) = FakeIssueTracker::new(make_issue(42, vec!["hitl"]));
     let (runner, prompt) = FakeRunner::succeeds();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -179,7 +216,7 @@ fn implement_fn_skips_hitl_issues_without_running_agent() {
 
 #[test]
 fn implement_fn_does_not_mark_complete_when_agent_fails() {
-    let (tracker, _, completed) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, completed, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let runner = FakeRunner::fails();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -219,4 +256,52 @@ fn run_returns_error_for_unknown_agent_kind() {
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("docker"));
+}
+
+// --- complete_ticket tests ---
+
+#[test]
+fn complete_ticket_runs_implement_review_and_instructions_when_clean() {
+    let (tracker, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let runner = SequencedRunner::new(vec![
+        agent_success(""),        // implement
+        agent_success("CLEAN"),   // review
+        agent_success(""),        // generate_test_instructions
+    ]);
+    let ctx = make_context_sequenced(tracker, runner, 10);
+
+    complete_ticket(42, &ctx).unwrap();
+
+    assert_eq!(ctx.iterations_used(), 3);
+}
+
+#[test]
+fn complete_ticket_loops_when_review_has_findings() {
+    let (tracker, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let runner = SequencedRunner::new(vec![
+        agent_success(""),          // implement
+        agent_success("<reviewResult>FINDINGS</reviewResult>"),  // review — has findings, loop back
+        agent_success(""),          // implement again
+        agent_success("<reviewResult>CLEAN</reviewResult>"),     // review — clean
+        agent_success(""),          // generate_test_instructions
+    ]);
+    let ctx = make_context_sequenced(tracker, runner, 10);
+
+    complete_ticket(42, &ctx).unwrap();
+
+    assert_eq!(ctx.iterations_used(), 5);
+}
+
+#[test]
+fn complete_ticket_marks_hitl_when_budget_exhausted() {
+    let (tracker, _, _, skipped) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let runner = SequencedRunner::new(vec![
+        agent_success(""),  // implement uses the only iteration
+        // review will hit budget
+    ]);
+    let ctx = make_context_sequenced(tracker, runner, 1);
+
+    complete_ticket(42, &ctx).unwrap();
+
+    assert!(skipped.borrow().contains(&42));
 }
