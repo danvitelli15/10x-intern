@@ -47,6 +47,14 @@ pub fn review(issue_id: u64, ctx: &Context) -> Result<bool> {
     Ok(output.stdout.contains("<reviewResult>FINDINGS</reviewResult>"))
 }
 
+pub fn feature_review(issue_id: u64, ctx: &Context) -> Result<bool> {
+    let issue = ctx.issues.get_issue(issue_id)?;
+    let diff = ctx.source_control.diff_from_base("main")?;
+    let prompt = build_feature_review_prompt(&issue, &diff);
+    let output = ctx.run_agent(&prompt)?;
+    Ok(output.stdout.contains("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>"))
+}
+
 pub fn generate_test_instructions(issue_id: u64, ctx: &Context) -> Result<()> {
     let issue = ctx.issues.get_issue(issue_id)?;
     let diff = ctx.source_control.diff_from_base("main")?;
@@ -70,6 +78,15 @@ fn build_plan_order_prompt(issues: &[Issue]) -> String {
         .collect::<Vec<_>>()
         .join("\n\n");
     DEFAULT.replace("{{issues_list}}", &issues_list)
+}
+
+fn build_feature_review_prompt(issue: &Issue, diff: &str) -> String {
+    const DEFAULT: &str = include_str!("../prompts/feature_review.md");
+    DEFAULT
+        .replace("{{issue_id}}", &issue.id.to_string())
+        .replace("{{issue_title}}", &issue.title)
+        .replace("{{issue_body}}", &issue.body)
+        .replace("{{diff}}", diff)
 }
 
 fn build_review_prompt(issue: &Issue, diff: &str) -> String {
@@ -149,6 +166,24 @@ mod tests {
             Box::new(StubEventSink),
             RunConfig { max_iterations: 10, commit_strategy: CommitStrategy::Direct, dry_run: false },
         )
+    }
+
+    #[test]
+    fn feature_review_returns_true_when_agent_outputs_in_scope_findings() {
+        let ctx = test_context("Analysis...\n<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>");
+        assert!(feature_review(1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn feature_review_returns_false_when_agent_outputs_clean() {
+        let ctx = test_context("Looks good.\n<featureReviewResult>CLEAN</featureReviewResult>");
+        assert!(!feature_review(1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn feature_review_does_not_false_positive_on_untagged_in_scope_findings() {
+        let ctx = test_context("I found IN_SCOPE_FINDINGS in the codebase.");
+        assert!(!feature_review(1, &ctx).unwrap());
     }
 
     #[test]

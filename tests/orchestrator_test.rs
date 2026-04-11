@@ -6,7 +6,7 @@ use anyhow::Result;
 use intern::cli::Command;
 use intern::config::{AgentConfig, Config, IssueTrackerConfig, RunDefaults};
 use intern::actions::implement;
-use intern::orchestrator::{complete_series, complete_ticket, run, Context};
+use intern::orchestrator::{complete_feature, complete_series, complete_ticket, run, Context};
 use intern::traits::{
     AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
     RemoteClient, RunConfig, SourceControl,
@@ -33,23 +33,30 @@ fn run_config() -> RunConfig {
 
 // --- Controllable fakes ---
 
+type ChildrenHandle = Rc<RefCell<VecDeque<Vec<Issue>>>>;
+
 struct FakeIssueTracker {
     issues: Vec<Issue>,
+    children_calls: ChildrenHandle,
     claimed: Rc<RefCell<Vec<u64>>>,
     completed: Rc<RefCell<Vec<u64>>>,
     skipped: Rc<RefCell<Vec<u64>>>,
 }
 
 impl FakeIssueTracker {
-    fn new(issue: Issue) -> (Self, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>) {
+    fn new(issue: Issue) -> (Self, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, ChildrenHandle) {
         Self::with_issues(vec![issue])
     }
 
-    fn with_issues(issues: Vec<Issue>) -> (Self, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>) {
+    fn with_issues(issues: Vec<Issue>) -> (Self, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, Rc<RefCell<Vec<u64>>>, ChildrenHandle) {
         let claimed = Rc::new(RefCell::new(vec![]));
         let completed = Rc::new(RefCell::new(vec![]));
         let skipped = Rc::new(RefCell::new(vec![]));
-        (Self { issues, claimed: claimed.clone(), completed: completed.clone(), skipped: skipped.clone() }, claimed, completed, skipped)
+        let children_calls: ChildrenHandle = Rc::new(RefCell::new(VecDeque::new()));
+        (
+            Self { issues, children_calls: children_calls.clone(), claimed: claimed.clone(), completed: completed.clone(), skipped: skipped.clone() },
+            claimed, completed, skipped, children_calls,
+        )
     }
 }
 
@@ -60,7 +67,7 @@ impl IssueTracker for FakeIssueTracker {
             .ok_or_else(|| anyhow::anyhow!("issue {id} not found in fake"))
     }
     fn get_children(&self, _id: u64) -> Result<Vec<Issue>> {
-        Ok(vec![])
+        Ok(self.children_calls.borrow_mut().pop_front().unwrap_or_default())
     }
     fn get_issues_by_label(&self, _label: &str) -> Result<Vec<Issue>> {
         Ok(self.issues.clone())
@@ -178,7 +185,7 @@ fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner, ma
 
 #[test]
 fn implement_fn_claims_issue_before_running_agent() {
-    let (tracker, claimed, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, claimed, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, _) = FakeRunner::succeeds();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -188,7 +195,7 @@ fn implement_fn_claims_issue_before_running_agent() {
 
 #[test]
 fn implement_fn_runs_agent_with_issue_content_in_prompt() {
-    let (tracker, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, prompt) = FakeRunner::succeeds();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -201,7 +208,7 @@ fn implement_fn_runs_agent_with_issue_content_in_prompt() {
 
 #[test]
 fn implement_fn_marks_complete_when_agent_succeeds() {
-    let (tracker, _, completed, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, completed, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, _) = FakeRunner::succeeds();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -211,7 +218,7 @@ fn implement_fn_marks_complete_when_agent_succeeds() {
 
 #[test]
 fn implement_fn_skips_hitl_issues_without_running_agent() {
-    let (tracker, claimed, _, _) = FakeIssueTracker::new(make_issue(42, vec!["hitl"]));
+    let (tracker, claimed, _, _, _) = FakeIssueTracker::new(make_issue(42, vec!["hitl"]));
     let (runner, prompt) = FakeRunner::succeeds();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -222,7 +229,7 @@ fn implement_fn_skips_hitl_issues_without_running_agent() {
 
 #[test]
 fn implement_fn_does_not_mark_complete_when_agent_fails() {
-    let (tracker, _, completed, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, completed, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let runner = FakeRunner::fails();
 
     implement(42, &make_context(tracker, runner)).unwrap();
@@ -268,7 +275,7 @@ fn run_returns_error_for_unknown_agent_kind() {
 
 #[test]
 fn complete_ticket_runs_implement_review_and_instructions_when_clean() {
-    let (tracker, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let runner = SequencedRunner::new(vec![
         agent_success(""),        // implement
         agent_success("CLEAN"),   // review
@@ -283,7 +290,7 @@ fn complete_ticket_runs_implement_review_and_instructions_when_clean() {
 
 #[test]
 fn complete_ticket_loops_when_review_has_findings() {
-    let (tracker, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let runner = SequencedRunner::new(vec![
         agent_success(""),          // implement
         agent_success("<reviewResult>FINDINGS</reviewResult>"),  // review — has findings, loop back
@@ -300,7 +307,7 @@ fn complete_ticket_loops_when_review_has_findings() {
 
 #[test]
 fn complete_ticket_marks_hitl_when_budget_exhausted() {
-    let (tracker, _, _, skipped) = FakeIssueTracker::new(make_issue(42, vec![]));
+    let (tracker, _, _, skipped, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let runner = SequencedRunner::new(vec![
         agent_success(""),  // implement uses the only iteration
         // review will hit budget
@@ -316,7 +323,7 @@ fn complete_ticket_marks_hitl_when_budget_exhausted() {
 
 #[test]
 fn complete_series_executes_tickets_in_plan_order_sequence() {
-    let (tracker, claimed, _, _) = FakeIssueTracker::with_issues(vec![
+    let (tracker, claimed, _, _, _) = FakeIssueTracker::with_issues(vec![
         make_issue(1, vec![]),
         make_issue(2, vec![]),
     ]);
@@ -334,4 +341,94 @@ fn complete_series_executes_tickets_in_plan_order_sequence() {
     complete_series("my-label", &ctx).unwrap();
 
     assert_eq!(*claimed.borrow(), vec![2, 1]);
+}
+
+// --- complete_feature tests ---
+
+#[test]
+fn complete_feature_executes_children_reviews_and_generates_instructions_when_clean() {
+    let child = make_issue(10, vec![]);
+    let (tracker, claimed, _, _, children_calls) = FakeIssueTracker::with_issues(vec![
+        make_issue(99, vec!["feature"]),
+        child.clone(),
+    ]);
+    children_calls.borrow_mut().push_back(vec![child]); // first get_children call
+
+    let runner = SequencedRunner::new(vec![
+        agent_success(r#"[{"id": 10}]"#),                                        // plan_order
+        agent_success(""),                                                        // implement child 10
+        agent_success("<reviewResult>CLEAN</reviewResult>"),                     // review child 10
+        agent_success(""),                                                        // instructions child 10
+        agent_success("<featureReviewResult>CLEAN</featureReviewResult>"),       // feature_review
+        agent_success(""),                                                        // feature instructions
+    ]);
+    let ctx = make_context_sequenced(tracker, runner, 20);
+
+    complete_feature(99, &ctx).unwrap();
+
+    assert!(claimed.borrow().contains(&10));
+}
+
+#[test]
+fn complete_feature_executes_new_children_after_in_scope_findings() {
+    let child_1 = make_issue(10, vec![]);
+    let child_2 = make_issue(11, vec![]);
+    let (tracker, claimed, _, _, children_calls) = FakeIssueTracker::with_issues(vec![
+        make_issue(99, vec!["feature"]),
+        child_1.clone(),
+        child_2.clone(),
+    ]);
+    children_calls.borrow_mut().push_back(vec![child_1.clone()]);                  // first get_children: original
+    children_calls.borrow_mut().push_back(vec![child_1.clone(), child_2]);        // second: original + review-created
+
+    let runner = SequencedRunner::new(vec![
+        agent_success(r#"[{"id": 10}]"#),                                        // plan_order (initial)
+        agent_success(""),                                                        // implement child 10
+        agent_success("<reviewResult>CLEAN</reviewResult>"),                     // review child 10
+        agent_success(""),                                                        // instructions child 10
+        agent_success("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>"), // feature_review — findings
+        agent_success(r#"[{"id": 11}]"#),                                        // plan_order (new children)
+        agent_success(""),                                                        // implement child 11
+        agent_success("<reviewResult>CLEAN</reviewResult>"),                     // review child 11
+        agent_success(""),                                                        // instructions child 11
+        agent_success("<featureReviewResult>CLEAN</featureReviewResult>"),       // second feature_review
+        agent_success(""),                                                        // feature instructions
+    ]);
+    let ctx = make_context_sequenced(tracker, runner, 30);
+
+    complete_feature(99, &ctx).unwrap();
+
+    assert!(claimed.borrow().contains(&10));
+    assert!(claimed.borrow().contains(&11));
+}
+
+#[test]
+fn complete_feature_marks_hitl_when_second_feature_review_still_has_findings() {
+    let child = make_issue(10, vec![]);
+    let child_2 = make_issue(11, vec![]);
+    let (tracker, _, _, skipped, children_calls) = FakeIssueTracker::with_issues(vec![
+        make_issue(99, vec!["feature"]),
+        child.clone(),
+        child_2.clone(),
+    ]);
+    children_calls.borrow_mut().push_back(vec![child.clone()]);
+    children_calls.borrow_mut().push_back(vec![child.clone(), child_2]);
+
+    let runner = SequencedRunner::new(vec![
+        agent_success(r#"[{"id": 10}]"#),                                        // plan_order
+        agent_success(""),                                                        // implement 10
+        agent_success("<reviewResult>CLEAN</reviewResult>"),                     // review 10
+        agent_success(""),                                                        // instructions 10
+        agent_success("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>"), // feature_review 1
+        agent_success(r#"[{"id": 11}]"#),                                        // plan_order new
+        agent_success(""),                                                        // implement 11
+        agent_success("<reviewResult>CLEAN</reviewResult>"),                     // review 11
+        agent_success(""),                                                        // instructions 11
+        agent_success("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>"), // feature_review 2 — still findings
+    ]);
+    let ctx = make_context_sequenced(tracker, runner, 30);
+
+    complete_feature(99, &ctx).unwrap();
+
+    assert!(skipped.borrow().contains(&99));
 }

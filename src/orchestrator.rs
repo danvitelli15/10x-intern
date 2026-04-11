@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use anyhow::Result;
 
-use crate::actions::{generate_test_instructions, implement, plan_order, review};
+use crate::actions::{feature_review, generate_test_instructions, implement, plan_order, review};
 use crate::cli::{Command, CommitStrategyArg};
 use crate::config::Config;
 use crate::git::GitClient;
@@ -17,11 +17,36 @@ use crate::traits::{
 
 pub fn complete_series(label: &str, ctx: &Context) -> Result<()> {
     let issues = ctx.issues.get_issues_by_label(label)?;
-    let ordered_ids = plan_order(&issues, ctx)?;
+    execute_ordered(&issues, ctx)
+}
+
+pub fn complete_feature(issue_id: u64, ctx: &Context) -> Result<()> {
+    let initial_children = ctx.issues.get_children(issue_id)?;
+    let initial_ids: std::collections::HashSet<u64> = initial_children.iter().map(|i| i.id).collect();
+    execute_ordered(&initial_children, ctx)?;
+
+    let has_findings = feature_review(issue_id, ctx)?;
+    if has_findings {
+        let all_children = ctx.issues.get_children(issue_id)?;
+        let new_children: Vec<_> = all_children.into_iter().filter(|i| !initial_ids.contains(&i.id)).collect();
+        execute_ordered(&new_children, ctx)?;
+
+        if feature_review(issue_id, ctx)? {
+            ctx.issues.skip_issue(issue_id)?;
+            return Ok(());
+        }
+    }
+
+    generate_test_instructions(issue_id, ctx)?;
+    Ok(())
+}
+
+fn execute_ordered(issues: &[crate::traits::Issue], ctx: &Context) -> Result<()> {
+    let ordered_ids = plan_order(issues, ctx)?;
     for id in ordered_ids {
         match ctx.issues.issue_type(id)? {
             IssueType::Ticket => complete_ticket(id, ctx)?,
-            IssueType::Feature => todo!("complete_feature"),
+            IssueType::Feature => complete_feature(id, ctx)?,
         }
     }
     Ok(())
