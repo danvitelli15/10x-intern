@@ -43,6 +43,11 @@ pub enum Event {
 
 // --- Ports (traits) ---
 
+pub enum IssueType {
+    Feature,
+    Ticket,
+}
+
 pub trait IssueTracker {
     fn get_issue(&self, id: u64) -> Result<Issue>;
     fn get_children(&self, id: u64) -> Result<Vec<Issue>>;
@@ -52,6 +57,7 @@ pub trait IssueTracker {
     fn skip_issue(&self, id: u64) -> Result<()>;
     fn post_comment(&self, id: u64, body: &str) -> Result<()>;
     fn create_child_issue(&self, parent_id: u64, title: &str, body: &str) -> Result<Issue>;
+    fn issue_type(&self, id: u64) -> Result<IssueType>;
 }
 
 pub trait SourceControl {

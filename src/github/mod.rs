@@ -3,7 +3,7 @@ pub mod types;
 use anyhow::Result;
 
 use crate::github::types::GhIssue;
-use crate::traits::{CommandRunner, Issue, IssueTracker, RemoteClient};
+use crate::traits::{CommandRunner, Issue, IssueTracker, IssueType, RemoteClient};
 
 fn parse_id_from_url(url: &str) -> Result<u64> {
     url.trim()
@@ -166,6 +166,15 @@ impl IssueTracker for GithubAdapter {
             labels: vec![],
         })
     }
+
+    fn issue_type(&self, id: u64) -> Result<IssueType> {
+        let issue = self.get_issue(id)?;
+        if issue.labels.iter().any(|l| l == "feature") {
+            Ok(IssueType::Feature)
+        } else {
+            Ok(IssueType::Ticket)
+        }
+    }
 }
 
 impl RemoteClient for GithubAdapter {
@@ -323,6 +332,26 @@ mod tests {
         drop(calls);
 
         assert_eq!(result, "https://github.com/owner/repo/pull/5");
+    }
+
+    #[test]
+    fn issue_type_returns_feature_when_labeled_feature() {
+        let json = r#"{"number": 1, "title": "T", "body": "B", "labels": [{"name": "feature"}]}"#;
+        let (adapter, _) = adapter(json);
+
+        let issue_type = adapter.issue_type(1).unwrap();
+
+        assert!(matches!(issue_type, IssueType::Feature));
+    }
+
+    #[test]
+    fn issue_type_returns_ticket_when_no_feature_label() {
+        let json = r#"{"number": 1, "title": "T", "body": "B", "labels": [{"name": "bug"}]}"#;
+        let (adapter, _) = adapter(json);
+
+        let issue_type = adapter.issue_type(1).unwrap();
+
+        assert!(matches!(issue_type, IssueType::Ticket));
     }
 
     #[test]

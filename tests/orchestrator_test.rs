@@ -2,10 +2,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use anyhow::Result;
-use intern::orchestrator::Orchestrator;
+use intern::cli::Command;
+use intern::config::{AgentConfig, Config, IssueTrackerConfig, RunDefaults};
+use intern::orchestrator::{implement, run, Context};
 use intern::traits::{
-    AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, RemoteClient,
-    RunConfig, SourceControl,
+    AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
+    RemoteClient, RunConfig, SourceControl,
 };
 
 // --- Helpers ---
@@ -70,6 +72,9 @@ impl IssueTracker for FakeIssueTracker {
     fn create_child_issue(&self, _parent_id: u64, _title: &str, _body: &str) -> Result<Issue> {
         todo!()
     }
+    fn issue_type(&self, _id: u64) -> Result<IssueType> {
+        Ok(IssueType::Ticket)
+    }
 }
 
 struct FakeSourceControl;
@@ -115,34 +120,35 @@ impl EventSink for FakeEventSink {
     fn emit(&self, _event: Event) {}
 }
 
-fn orchestrator(tracker: FakeIssueTracker, runner: FakeRunner) -> Orchestrator {
-    Orchestrator::new(
-        Box::new(tracker),
-        Box::new(FakeSourceControl),
-        Box::new(FakeRemoteClient),
-        Box::new(runner),
-        Box::new(FakeEventSink),
-    )
+fn make_context(tracker: FakeIssueTracker, runner: FakeRunner) -> Context {
+    Context {
+        issues: Box::new(tracker),
+        source_control: Box::new(FakeSourceControl),
+        remote: Box::new(FakeRemoteClient),
+        runner: Box::new(runner),
+        events: Box::new(FakeEventSink),
+        config: run_config(),
+    }
 }
 
-// --- Tests ---
+// --- Tests (new interface) ---
 
 #[test]
-fn implement_claims_issue_before_running_agent() {
+fn implement_fn_claims_issue_before_running_agent() {
     let (tracker, claimed, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, _) = FakeRunner::succeeds();
 
-    orchestrator(tracker, runner).implement(42, &run_config()).unwrap();
+    implement(42, &make_context(tracker, runner)).unwrap();
 
     assert!(claimed.borrow().contains(&42));
 }
 
 #[test]
-fn implement_runs_agent_with_issue_content_in_prompt() {
+fn implement_fn_runs_agent_with_issue_content_in_prompt() {
     let (tracker, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, prompt) = FakeRunner::succeeds();
 
-    orchestrator(tracker, runner).implement(42, &run_config()).unwrap();
+    implement(42, &make_context(tracker, runner)).unwrap();
 
     let prompt = prompt.borrow();
     let prompt = prompt.as_ref().unwrap();
@@ -151,32 +157,66 @@ fn implement_runs_agent_with_issue_content_in_prompt() {
 }
 
 #[test]
-fn implement_marks_complete_when_agent_succeeds() {
+fn implement_fn_marks_complete_when_agent_succeeds() {
     let (tracker, _, completed) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, _) = FakeRunner::succeeds();
 
-    orchestrator(tracker, runner).implement(42, &run_config()).unwrap();
+    implement(42, &make_context(tracker, runner)).unwrap();
 
     assert!(completed.borrow().contains(&42));
 }
 
 #[test]
-fn implement_skips_hitl_issues_without_running_agent() {
+fn implement_fn_skips_hitl_issues_without_running_agent() {
     let (tracker, claimed, _) = FakeIssueTracker::new(make_issue(42, vec!["hitl"]));
     let (runner, prompt) = FakeRunner::succeeds();
 
-    orchestrator(tracker, runner).implement(42, &run_config()).unwrap();
+    implement(42, &make_context(tracker, runner)).unwrap();
 
     assert!(claimed.borrow().is_empty());
     assert!(prompt.borrow().is_none());
 }
 
 #[test]
-fn implement_does_not_mark_complete_when_agent_fails() {
+fn implement_fn_does_not_mark_complete_when_agent_fails() {
     let (tracker, _, completed) = FakeIssueTracker::new(make_issue(42, vec![]));
     let runner = FakeRunner::fails();
 
-    orchestrator(tracker, runner).implement(42, &run_config()).unwrap();
+    implement(42, &make_context(tracker, runner)).unwrap();
 
     assert!(completed.borrow().is_empty());
+}
+
+fn implement_command(issue_id: u64) -> Command {
+    Command::Implement { issue_id, dry_run: false, max_iterations: None, commit_strategy: None }
+}
+
+fn github_config() -> Config {
+    Config {
+        issue_tracker: IssueTrackerConfig { kind: "github".to_string(), repo: "owner/repo".to_string() },
+        agent: AgentConfig { kind: "local".to_string(), settings_file: None },
+        run: RunDefaults::default(),
+    }
+}
+
+#[test]
+fn run_returns_error_for_unknown_issue_tracker_kind() {
+    let mut config = github_config();
+    config.issue_tracker.kind = "linear".to_string();
+
+    let result = run(implement_command(1), config);
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("linear"));
+}
+
+#[test]
+fn run_returns_error_for_unknown_agent_kind() {
+    let mut config = github_config();
+    config.agent.kind = "docker".to_string();
+
+    let result = run(implement_command(1), config);
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("docker"));
 }
