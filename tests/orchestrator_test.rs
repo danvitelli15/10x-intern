@@ -121,14 +121,14 @@ impl EventSink for FakeEventSink {
 }
 
 fn make_context(tracker: FakeIssueTracker, runner: FakeRunner) -> Context {
-    Context {
-        issues: Box::new(tracker),
-        source_control: Box::new(FakeSourceControl),
-        remote: Box::new(FakeRemoteClient),
-        runner: Box::new(runner),
-        events: Box::new(FakeEventSink),
-        config: run_config(),
-    }
+    Context::new(
+        Box::new(tracker),
+        Box::new(FakeSourceControl),
+        Box::new(FakeRemoteClient),
+        Box::new(runner),
+        Box::new(FakeEventSink),
+        run_config(),
+    )
 }
 
 // --- Tests (new interface) ---
