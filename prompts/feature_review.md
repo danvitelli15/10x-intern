@@ -1,12 +1,8 @@
-# Available variables
-# {{issue_id}}    — the GitHub issue number
-# {{issue_title}} — the feature issue title
-# {{issue_body}}  — the full feature issue body / acceptance criteria
-# {{diff}}        — the aggregate git diff since the base branch
+{{repo_context}}
 
-Please perform a holistic review of the following feature:
+## Feature Review: Issue #{{issue_id}}
 
-## Feature #{{issue_id}}: {{issue_title}}
+**{{issue_title}}**
 
 ### Acceptance criteria
 {{issue_body}}

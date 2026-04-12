@@ -1,12 +1,8 @@
-# Available variables
-# {{issue_id}}    — the GitHub issue number
-# {{issue_title}} — the issue title
-# {{issue_body}}  — the full issue body / acceptance criteria
-# {{diff}}        — the git diff since the base branch
+{{repo_context}}
 
-Please review the implementation of the following GitHub issue:
+## Review: Issue #{{issue_id}}
 
-## Issue #{{issue_id}}: {{issue_title}}
+**{{issue_title}}**
 
 ### Acceptance criteria
 {{issue_body}}
@@ -16,13 +12,15 @@ Please review the implementation of the following GitHub issue:
 {{diff}}
 ```
 
-Evaluate whether the implementation satisfies the acceptance criteria. Also check for:
-- Style guide violations
-- Obvious testing gaps
-- Obvious refactor candidates
+Review the changes against the acceptance criteria. Check for:
+- Gaps: does the implementation fully satisfy every acceptance criterion?
+- Correctness: are there bugs, edge cases, or error paths not handled?
+- Consistency: do the changes follow the patterns established in the rest of the codebase?
 
-If there are issues to address, create a single GitHub issue consolidating all findings as a child of issue #{{issue_id}}, then output the following on the last line of your response:
+Do not flag pre-existing issues unrelated to this change.
+
+If there are issues to address, create a single GitHub issue consolidating all findings as a child of issue #{{issue_id}}, then output on the last line:
 <reviewResult>FINDINGS</reviewResult>
 
-If the implementation is satisfactory, output the following on the last line of your response:
+If the implementation is satisfactory, output on the last line:
 <reviewResult>CLEAN</reviewResult>
