@@ -1,8 +1,19 @@
+use std::path::Path;
+
 use anyhow::Result;
 use serde::Deserialize;
 
 use crate::orchestrator::Context;
 use crate::traits::Issue;
+
+fn load_prompt(base_dir: &Path, name: &str, builtin: &str) -> String {
+    let override_path = base_dir.join(".intern/prompts").join(format!("{name}.md"));
+    if override_path.exists() {
+        std::fs::read_to_string(&override_path).unwrap_or_else(|_| builtin.to_string())
+    } else {
+        builtin.to_string()
+    }
+}
 
 #[derive(Deserialize)]
 struct OrderedItem {
@@ -221,6 +232,23 @@ mod tests {
     fn review_does_not_false_positive_on_untagged_findings() {
         let ctx = test_context("I found several FINDINGS in the analysis.");
         assert!(!review(1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn load_prompt_uses_override_file_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join("implement.md"), "custom prompt").unwrap();
+        let result = load_prompt(dir.path(), "implement", "builtin prompt");
+        assert_eq!(result, "custom prompt");
+    }
+
+    #[test]
+    fn load_prompt_falls_back_to_builtin_when_no_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = load_prompt(dir.path(), "implement", "builtin prompt");
+        assert_eq!(result, "builtin prompt");
     }
 
     #[test]
