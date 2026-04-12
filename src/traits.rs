@@ -23,6 +23,7 @@ pub struct RunConfig {
     pub commit_strategy: CommitStrategy,
     pub dry_run: bool,
     pub repo_context: String,
+    pub work_directory: std::path::PathBuf,
 }
 
 #[derive(Debug)]

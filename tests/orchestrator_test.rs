@@ -29,6 +29,7 @@ fn run_config() -> RunConfig {
         commit_strategy: CommitStrategy::Direct,
         dry_run: false,
         repo_context: String::new(),
+        work_directory: std::path::PathBuf::from("."),
     }
 }
 
@@ -178,7 +179,7 @@ fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner, ma
         Box::new(FakeRemoteClient),
         Box::new(runner),
         Box::new(FakeEventSink),
-        RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new() },
+        RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new(), work_directory: std::path::PathBuf::from(".") },
     )
 }
 
@@ -248,6 +249,7 @@ fn github_config() -> Config {
         agent: AgentConfig { kind: "local".to_string(), settings_file: None },
         run: RunDefaults::default(),
         context_file: None,
+        work_directory: None,
     }
 }
 

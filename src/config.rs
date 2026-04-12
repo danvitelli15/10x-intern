@@ -12,6 +12,7 @@ pub struct Config {
     #[serde(default)]
     pub run: RunDefaults,
     pub context_file: Option<String>,
+    pub work_directory: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +46,15 @@ impl Default for RunDefaults {
     }
 }
 
+impl Config {
+    pub fn resolve_work_directory(&self) -> std::path::PathBuf {
+        match &self.work_directory {
+            Some(dir) => std::path::PathBuf::from(dir),
+            None => std::env::current_dir().unwrap_or_default(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,6 +71,57 @@ mod tests {
         "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.context_file, Some("CLAUDE.md".to_string()));
+    }
+
+    #[test]
+    fn config_deserializes_work_directory() {
+        let toml = r#"
+            work_directory = "/projects/myrepo"
+            [issue_tracker]
+            kind = "github"
+            repo = "owner/repo"
+            [agent]
+            kind = "local"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.work_directory, Some("/projects/myrepo".to_string()));
+    }
+
+    #[test]
+    fn config_work_directory_defaults_to_none() {
+        let toml = r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "owner/repo"
+            [agent]
+            kind = "local"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.work_directory, None);
+    }
+
+    #[test]
+    fn resolve_work_directory_uses_config_value_when_set() {
+        let config = Config {
+            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
+            agent: AgentConfig { kind: "local".into(), settings_file: None },
+            run: RunDefaults::default(),
+            context_file: None,
+            work_directory: Some("/projects/myrepo".into()),
+        };
+        assert_eq!(config.resolve_work_directory(), std::path::PathBuf::from("/projects/myrepo"));
+    }
+
+    #[test]
+    fn resolve_work_directory_defaults_to_cwd_when_not_set() {
+        let config = Config {
+            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
+            agent: AgentConfig { kind: "local".into(), settings_file: None },
+            run: RunDefaults::default(),
+            context_file: None,
+            work_directory: None,
+        };
+        assert_eq!(config.resolve_work_directory(), std::env::current_dir().unwrap());
     }
 
     #[test]

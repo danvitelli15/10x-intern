@@ -64,6 +64,7 @@ mod tests {
             commit_strategy: CommitStrategy::Direct,
             dry_run,
             repo_context: String::new(),
+            work_directory: std::path::PathBuf::from("."),
         }
     }
 

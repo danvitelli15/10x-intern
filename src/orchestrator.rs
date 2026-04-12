@@ -196,6 +196,7 @@ fn build_run_config(command: &Command, config: &Config) -> RunConfig {
         commit_strategy,
         dry_run,
         repo_context: String::new(),
+        work_directory: config.resolve_work_directory(),
     }
 }
 
@@ -252,7 +253,7 @@ mod tests {
             Box::new(StubRemoteClient),
             Box::new(StubRunner),
             Box::new(StubEventSink),
-            RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new() },
+            RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new(), work_directory: std::path::PathBuf::from(".") },
         )
     }
 
