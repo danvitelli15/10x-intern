@@ -166,10 +166,10 @@ fn build_context(command: &Command, config: &Config) -> Result<Context> {
 
     let events: Box<dyn EventSink> = Box::new(LogReporter);
 
-    Ok(Context::new(issues, source_control, remote, runner, events, build_run_config(command, config)))
+    Ok(Context::new(issues, source_control, remote, runner, events, build_run_config(command, config)?))
 }
 
-fn build_run_config(command: &Command, config: &Config) -> RunConfig {
+fn build_run_config(command: &Command, config: &Config) -> Result<RunConfig> {
     let (dry_run, max_iterations_override, commit_strategy_override) = match command {
         Command::Implement { dry_run, max_iterations, commit_strategy, .. } => {
             (*dry_run, *max_iterations, commit_strategy.clone())
@@ -191,13 +191,13 @@ fn build_run_config(command: &Command, config: &Config) -> RunConfig {
         },
     };
 
-    RunConfig {
+    Ok(RunConfig {
         max_iterations: max_iterations_override.unwrap_or(config.run.max_iterations),
         commit_strategy,
         dry_run,
-        repo_context: String::new(),
+        repo_context: config.resolve_repo_context()?,
         work_directory: config.resolve_work_directory(),
-    }
+    })
 }
 
 #[cfg(test)]

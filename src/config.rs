@@ -53,6 +53,13 @@ impl Config {
             None => std::env::current_dir().unwrap_or_default(),
         }
     }
+
+    pub fn resolve_repo_context(&self) -> Result<String> {
+        match &self.context_file {
+            Some(path) => Ok(std::fs::read_to_string(path)?),
+            None => Ok(String::new()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -122,6 +129,44 @@ mod tests {
             work_directory: None,
         };
         assert_eq!(config.resolve_work_directory(), std::env::current_dir().unwrap());
+    }
+
+    #[test]
+    fn resolve_repo_context_returns_file_contents_when_context_file_set() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "use snake_case everywhere").unwrap();
+        let config = Config {
+            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
+            agent: AgentConfig { kind: "local".into(), settings_file: None },
+            run: RunDefaults::default(),
+            context_file: Some(file.path().to_string_lossy().into_owned()),
+            work_directory: None,
+        };
+        assert_eq!(config.resolve_repo_context().unwrap(), "use snake_case everywhere");
+    }
+
+    #[test]
+    fn resolve_repo_context_returns_empty_string_when_not_set() {
+        let config = Config {
+            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
+            agent: AgentConfig { kind: "local".into(), settings_file: None },
+            run: RunDefaults::default(),
+            context_file: None,
+            work_directory: None,
+        };
+        assert_eq!(config.resolve_repo_context().unwrap(), "");
+    }
+
+    #[test]
+    fn resolve_repo_context_errors_when_context_file_missing() {
+        let config = Config {
+            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
+            agent: AgentConfig { kind: "local".into(), settings_file: None },
+            run: RunDefaults::default(),
+            context_file: Some("/nonexistent/path/context.md".into()),
+            work_directory: None,
+        };
+        assert!(config.resolve_repo_context().is_err());
     }
 
     #[test]
