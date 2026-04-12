@@ -27,7 +27,7 @@ pub fn implement(issue_id: u64, ctx: &Context) -> Result<()> {
     ctx.issues.claim_issue(issue_id)?;
     ctx.events.emit(crate::traits::Event::AgentStarted(issue_id));
 
-    let prompt = build_implement_prompt(&issue);
+    let prompt = build_implement_prompt(&issue, &ctx.config.repo_context);
     let output = ctx.run_agent(&prompt)?;
 
     if output.success {
@@ -63,12 +63,13 @@ pub fn generate_test_instructions(issue_id: u64, ctx: &Context) -> Result<()> {
     Ok(())
 }
 
-fn build_implement_prompt(issue: &Issue) -> String {
+fn build_implement_prompt(issue: &Issue, repo_context: &str) -> String {
     const DEFAULT: &str = include_str!("../prompts/implement.md");
     DEFAULT
         .replace("{{issue_id}}", &issue.id.to_string())
         .replace("{{issue_title}}", &issue.title)
         .replace("{{issue_body}}", &issue.body)
+        .replace("{{repo_context}}", repo_context)
 }
 
 fn build_plan_order_prompt(issues: &[Issue]) -> String {
@@ -164,7 +165,7 @@ mod tests {
             Box::new(StubRemoteClient),
             Box::new(FixedRunner { stdout: stdout.to_string() }),
             Box::new(StubEventSink),
-            RunConfig { max_iterations: 10, commit_strategy: CommitStrategy::Direct, dry_run: false },
+            RunConfig { max_iterations: 10, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new() },
         )
     }
 
@@ -220,5 +221,19 @@ mod tests {
     fn review_does_not_false_positive_on_untagged_findings() {
         let ctx = test_context("I found several FINDINGS in the analysis.");
         assert!(!review(1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn implement_prompt_includes_repo_context() {
+        let issue = Issue { id: 1, title: "T".into(), body: "B".into(), labels: vec![] };
+        let prompt = build_implement_prompt(&issue, "use snake_case everywhere");
+        assert!(prompt.contains("use snake_case everywhere"));
+    }
+
+    #[test]
+    fn implement_prompt_with_empty_repo_context_does_not_panic() {
+        let issue = Issue { id: 1, title: "T".into(), body: "B".into(), labels: vec![] };
+        let prompt = build_implement_prompt(&issue, "");
+        assert!(!prompt.is_empty());
     }
 }

@@ -63,6 +63,7 @@ mod tests {
             max_iterations: 10,
             commit_strategy: CommitStrategy::Direct,
             dry_run,
+            repo_context: String::new(),
         }
     }
 

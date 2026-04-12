@@ -195,6 +195,7 @@ fn build_run_config(command: &Command, config: &Config) -> RunConfig {
         max_iterations: max_iterations_override.unwrap_or(config.run.max_iterations),
         commit_strategy,
         dry_run,
+        repo_context: String::new(),
     }
 }
 
@@ -251,7 +252,7 @@ mod tests {
             Box::new(StubRemoteClient),
             Box::new(StubRunner),
             Box::new(StubEventSink),
-            RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false },
+            RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new() },
         )
     }
 

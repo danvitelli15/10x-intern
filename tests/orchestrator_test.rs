@@ -28,6 +28,7 @@ fn run_config() -> RunConfig {
         max_iterations: 10,
         commit_strategy: CommitStrategy::Direct,
         dry_run: false,
+        repo_context: String::new(),
     }
 }
 
@@ -177,7 +178,7 @@ fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner, ma
         Box::new(FakeRemoteClient),
         Box::new(runner),
         Box::new(FakeEventSink),
-        RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false },
+        RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new() },
     )
 }
 

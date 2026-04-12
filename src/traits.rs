@@ -22,6 +22,7 @@ pub struct RunConfig {
     pub max_iterations: u32,
     pub commit_strategy: CommitStrategy,
     pub dry_run: bool,
+    pub repo_context: String,
 }
 
 #[derive(Debug)]
