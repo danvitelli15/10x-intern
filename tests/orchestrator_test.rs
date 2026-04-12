@@ -246,6 +246,7 @@ fn github_config() -> Config {
         issue_tracker: IssueTrackerConfig { kind: "github".to_string(), repo: "owner/repo".to_string() },
         agent: AgentConfig { kind: "local".to_string(), settings_file: None },
         run: RunDefaults::default(),
+        context_file: None,
     }
 }
 

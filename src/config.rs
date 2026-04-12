@@ -11,6 +11,7 @@ pub struct Config {
     pub agent: AgentConfig,
     #[serde(default)]
     pub run: RunDefaults,
+    pub context_file: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +42,38 @@ impl Default for RunDefaults {
             max_iterations: 100,
             commit_strategy: "feature-branch".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_deserializes_context_file() {
+        let toml = r#"
+            context_file = "CLAUDE.md"
+            [issue_tracker]
+            kind = "github"
+            repo = "owner/repo"
+            [agent]
+            kind = "local"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.context_file, Some("CLAUDE.md".to_string()));
+    }
+
+    #[test]
+    fn config_context_file_defaults_to_none() {
+        let toml = r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "owner/repo"
+            [agent]
+            kind = "local"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.context_file, None);
     }
 }
 
