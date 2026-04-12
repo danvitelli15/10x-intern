@@ -8,7 +8,7 @@ use crate::traits::{CommandRunner, Issue, IssueTracker, IssueType, RemoteClient}
 fn parse_id_from_url(url: &str) -> Result<u64> {
     url.trim()
         .split('/')
-        .last()
+        .next_back()
         .ok_or_else(|| anyhow::anyhow!("unexpected URL format: {}", url))?
         .parse::<u64>()
         .map_err(|e| anyhow::anyhow!("failed to parse ID from URL '{}': {}", url.trim(), e))
