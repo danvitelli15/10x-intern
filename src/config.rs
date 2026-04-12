@@ -170,6 +170,59 @@ mod tests {
     }
 
     #[test]
+    fn load_from_finds_intern_directory_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let intern_dir = dir.path().join(".intern");
+        std::fs::create_dir_all(&intern_dir).unwrap();
+        std::fs::write(intern_dir.join("config.toml"), r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "owner/repo"
+            [agent]
+            kind = "local"
+        "#).unwrap();
+        let config = Config::load_from(dir.path()).unwrap();
+        assert_eq!(config.issue_tracker.repo, "owner/repo");
+    }
+
+    #[test]
+    fn load_from_falls_back_to_legacy_intern_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".intern.toml"), r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "legacy/repo"
+            [agent]
+            kind = "local"
+        "#).unwrap();
+        let config = Config::load_from(dir.path()).unwrap();
+        assert_eq!(config.issue_tracker.repo, "legacy/repo");
+    }
+
+    #[test]
+    fn load_from_intern_directory_config_takes_precedence_over_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        let intern_dir = dir.path().join(".intern");
+        std::fs::create_dir_all(&intern_dir).unwrap();
+        std::fs::write(intern_dir.join("config.toml"), r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "new/repo"
+            [agent]
+            kind = "local"
+        "#).unwrap();
+        std::fs::write(dir.path().join(".intern.toml"), r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "legacy/repo"
+            [agent]
+            kind = "local"
+        "#).unwrap();
+        let config = Config::load_from(dir.path()).unwrap();
+        assert_eq!(config.issue_tracker.repo, "new/repo");
+    }
+
+    #[test]
     fn config_context_file_defaults_to_none() {
         let toml = r#"
             [issue_tracker]
@@ -184,19 +237,26 @@ mod tests {
 }
 
 impl Config {
+    /// Load config using the current working directory as the project root.
+    pub fn load() -> Result<Self> {
+        Self::load_from(&std::env::current_dir()?)
+    }
+
     /// Load config from (in order, later overrides earlier):
-    ///   1. ~/.intern/config.toml  (global user config)
-    ///   2. .intern.toml           (per-repo config)
+    ///   1. ~/.intern/config.toml      (global user config)
+    ///   2. <dir>/.intern.toml         (legacy per-repo config)
+    ///   3. <dir>/.intern/config.toml  (per-repo config, takes precedence)
     ///
     /// CLI flag overrides are applied in main before constructing adapters.
-    pub fn load() -> Result<Self> {
+    pub fn load_from(dir: &std::path::Path) -> Result<Self> {
         let global = dirs::home_dir()
             .map(|h| h.join(".intern/config.toml"))
             .unwrap_or_default();
 
         let config = Figment::new()
             .merge(Toml::file(global))
-            .merge(Toml::file(".intern.toml"))
+            .merge(Toml::file(dir.join(".intern.toml")))
+            .merge(Toml::file(dir.join(".intern/config.toml")))
             .extract()?;
 
         Ok(config)
