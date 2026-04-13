@@ -52,9 +52,10 @@ impl UserInteractor for StubInteractor {
             .expect("StubInteractor: no text response queued"))
     }
 
-    fn prompt_choice(&self, _question: &str, choices: &[String]) -> Result<usize> {
+    fn prompt_choice(&self, _question: &str, choices: &[String], default_idx: Option<usize>) -> Result<usize> {
         let idx = self.choice_responses.borrow_mut().pop_front()
-            .expect("StubInteractor: no choice response queued");
+            .or(default_idx)
+            .expect("StubInteractor: no choice response queued and no default provided");
         assert!(idx < choices.len(), "StubInteractor: choice index out of range");
         Ok(idx)
     }
@@ -181,6 +182,35 @@ impl AgentRunner for SequencedRunner {
     fn run(&self, _prompt: &str, _config: &RunConfig) -> Result<AgentOutput> {
         self.responses.borrow_mut().pop_front()
             .ok_or_else(|| anyhow::anyhow!("SequencedRunner: no more responses queued"))
+    }
+}
+
+// --- Sequenced command runner ---
+
+pub struct SequencedCommandRunner {
+    responses: RefCell<VecDeque<Result<String>>>,
+}
+
+impl SequencedCommandRunner {
+    pub fn new() -> Self {
+        Self { responses: RefCell::new(VecDeque::new()) }
+    }
+
+    pub fn then_ok(self, output: &str) -> Self {
+        self.responses.borrow_mut().push_back(Ok(output.to_string()));
+        self
+    }
+
+    pub fn then_err(self, msg: &str) -> Self {
+        self.responses.borrow_mut().push_back(Err(anyhow::anyhow!("{}", msg)));
+        self
+    }
+}
+
+impl intern::traits::CommandRunner for SequencedCommandRunner {
+    fn run(&self, _program: &str, _args: &[&str]) -> Result<String> {
+        self.responses.borrow_mut().pop_front()
+            .unwrap_or_else(|| Err(anyhow::anyhow!("SequencedCommandRunner: no more responses")))
     }
 }
 

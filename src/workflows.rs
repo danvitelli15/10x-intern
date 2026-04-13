@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::behaviors::{complete_ticket, execute_ordered, interactive_config_wizard, scaffold_intern_directory, UserInteractor, WizardOutput};
+use crate::behaviors::{complete_ticket, detect_wizard_hints, execute_ordered, interactive_config_wizard, scaffold_intern_directory, UserInteractor, WizardOutput};
 use crate::cli::{Command, CommitStrategyArg};
 use crate::config::Config;
 use crate::context::Context;
@@ -12,7 +12,9 @@ use crate::runner::LocalRunner;
 use crate::traits::{CommitStrategy, RunConfig};
 
 pub fn init_workflow(base_dir: &std::path::Path, interactor: &dyn UserInteractor) -> Result<()> {
-    let wizard_output = interactive_config_wizard(base_dir, interactor)?;
+    let runner = ProcessRunner;
+    let hints = detect_wizard_hints(base_dir, &runner);
+    let wizard_output = interactive_config_wizard(base_dir, interactor, &hints)?;
     scaffold_intern_directory(base_dir, &wizard_output)
 }
 

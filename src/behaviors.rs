@@ -1,14 +1,58 @@
 use anyhow::Result;
 
 use crate::actions::{
-    create_file, feature_review, generate_test_instructions, implement, plan_order, review,
+    create_file, detect_repo_slug, feature_review, find_file, generate_test_instructions,
+    implement, plan_order, review,
 };
 use crate::context::{BudgetExhausted, Context};
-use crate::traits::{AgentKind, CommitStrategy, IssueTrackerKind, IssueType, SourceControlKind};
+use crate::traits::{
+    AgentKind, CommandRunner, CommitStrategy, IssueTrackerKind, IssueType, SourceControlKind,
+};
+
+pub struct WizardHints {
+    pub repo: Option<String>,
+    pub context_file: Option<String>,
+    pub source_control_kind: Option<SourceControlKind>,
+}
+
+impl WizardHints {
+    pub fn none() -> Self {
+        Self {
+            repo: None,
+            context_file: None,
+            source_control_kind: None,
+        }
+    }
+}
+
+const KNOWN_CONTEXT_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
+
+pub fn detect_wizard_hints(base_dir: &std::path::Path, runner: &dyn CommandRunner) -> WizardHints {
+    let repo = detect_repo_slug(runner);
+    let context_file = KNOWN_CONTEXT_FILES
+        .iter()
+        .find(|&&name| find_file(base_dir, name).is_some())
+        .map(|&name| name.to_string());
+    let source_control_kind = if find_file(base_dir, ".git").is_some() {
+        Some(SourceControlKind::Git)
+    } else {
+        None
+    };
+    WizardHints {
+        repo,
+        context_file,
+        source_control_kind,
+    }
+}
 
 pub trait UserInteractor {
     fn prompt_text(&self, question: &str, default: Option<&str>) -> Result<String>;
-    fn prompt_choice(&self, question: &str, choices: &[String]) -> Result<usize>;
+    fn prompt_choice(
+        &self,
+        question: &str,
+        choices: &[String],
+        default_idx: Option<usize>,
+    ) -> Result<usize>;
     fn prompt_confirm(&self, question: &str, default: bool) -> Result<bool>;
 }
 
@@ -25,8 +69,17 @@ impl UserInteractor for TerminalInteractor {
         Ok(prompt.prompt()?)
     }
 
-    fn prompt_choice(&self, question: &str, choices: &[String]) -> Result<usize> {
-        let answer = inquire::Select::new(question, choices.to_vec()).prompt()?;
+    fn prompt_choice(
+        &self,
+        question: &str,
+        choices: &[String],
+        default_idx: Option<usize>,
+    ) -> Result<usize> {
+        let mut select = inquire::Select::new(question, choices.to_vec());
+        if let Some(idx) = default_idx {
+            select = select.with_starting_cursor(idx);
+        }
+        let answer = select.prompt()?;
         Ok(choices.iter().position(|c| c == &answer).unwrap())
     }
 
@@ -95,8 +148,12 @@ impl HasDescription for AgentKind {
 }
 
 impl HasDescription for SourceControlKind {
-    fn label(&self) -> &'static str { SourceControlKind::label(self) }
-    fn description(&self) -> &'static str { SourceControlKind::description(self) }
+    fn label(&self) -> &'static str {
+        SourceControlKind::label(self)
+    }
+    fn description(&self) -> &'static str {
+        SourceControlKind::description(self)
+    }
 }
 
 impl HasDescription for CommitStrategy {
@@ -111,17 +168,26 @@ impl HasDescription for CommitStrategy {
 pub fn interactive_config_wizard(
     _base_dir: &std::path::Path,
     interactor: &dyn UserInteractor,
+    hints: &WizardHints,
 ) -> Result<WizardOutput> {
     let tracker_idx =
-        interactor.prompt_choice("Issue tracker", &choice_list(IssueTrackerKind::all()))?;
+        interactor.prompt_choice("Issue tracker", &choice_list(IssueTrackerKind::all()), None)?;
     let issue_tracker_kind = IssueTrackerKind::all()[tracker_idx];
 
-    let repo = interactor.prompt_text("Repository (owner/repo)", Some("owner/repo"))?;
+    let repo_default = hints.repo.as_deref().unwrap_or("owner/repo");
+    let repo = interactor.prompt_text("Repository (owner/repo)", Some(repo_default))?;
 
-    let sc_idx = interactor.prompt_choice("Source control", &choice_list(SourceControlKind::all()))?;
+    let sc_default = hints
+        .source_control_kind
+        .and_then(|k| SourceControlKind::all().iter().position(|v| v == &k));
+    let sc_idx = interactor.prompt_choice(
+        "Source control",
+        &choice_list(SourceControlKind::all()),
+        sc_default,
+    )?;
     let source_control_kind = SourceControlKind::all()[sc_idx];
 
-    let agent_idx = interactor.prompt_choice("Agent", &choice_list(AgentKind::all()))?;
+    let agent_idx = interactor.prompt_choice("Agent", &choice_list(AgentKind::all()), None)?;
     let agent_kind = AgentKind::all()[agent_idx];
 
     let settings_file = if interactor.prompt_confirm("Specify an agent settings file?", false)? {
@@ -130,15 +196,16 @@ pub fn interactive_config_wizard(
         None
     };
 
+    let context_file_default = hints.context_file.as_deref().unwrap_or("CLAUDE.md");
     let context_file =
         if interactor.prompt_confirm("Specify a context file (e.g. CLAUDE.md)?", false)? {
-            Some(interactor.prompt_text("Context file path", Some("CLAUDE.md"))?)
+            Some(interactor.prompt_text("Context file path", Some(context_file_default))?)
         } else {
             None
         };
 
     let strategy_idx =
-        interactor.prompt_choice("Commit strategy", &choice_list(CommitStrategy::all()))?;
+        interactor.prompt_choice("Commit strategy", &choice_list(CommitStrategy::all()), None)?;
     let commit_strategy = CommitStrategy::all()[strategy_idx];
 
     let output = WizardOutput {

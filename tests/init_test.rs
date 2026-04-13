@@ -1,4 +1,4 @@
-use intern::behaviors::{interactive_config_wizard, WizardOutput};
+use intern::behaviors::{interactive_config_wizard, WizardHints, WizardOutput};
 use intern::traits::{CommitStrategy, IssueTrackerKind, SourceControlKind};
 use intern::workflows::{init_workflow, init_workflow_with_defaults};
 
@@ -17,7 +17,7 @@ fn wizard_captures_source_control_kind() {
         .with_confirm(true);     // summary
 
     let dir = tempfile::tempdir().unwrap();
-    let output = interactive_config_wizard(dir.path(), &interactor).unwrap();
+    let output = interactive_config_wizard(dir.path(), &interactor, &WizardHints::none()).unwrap();
     assert_eq!(output.source_control_kind, SourceControlKind::None);
 }
 
@@ -34,7 +34,7 @@ fn wizard_captures_repo_from_user_input() {
         .with_confirm(true);     // summary: looks good
 
     let dir = tempfile::tempdir().unwrap();
-    let output = interactive_config_wizard(dir.path(), &interactor).unwrap();
+    let output = interactive_config_wizard(dir.path(), &interactor, &WizardHints::none()).unwrap();
     assert_eq!(output.repo, "myorg/myrepo");
 }
 
@@ -52,7 +52,7 @@ fn wizard_captures_context_file_when_user_says_yes() {
         .with_confirm(true);        // summary
 
     let dir = tempfile::tempdir().unwrap();
-    let output = interactive_config_wizard(dir.path(), &interactor).unwrap();
+    let output = interactive_config_wizard(dir.path(), &interactor, &WizardHints::none()).unwrap();
     assert_eq!(output.context_file, Some("AGENTS.md".to_string()));
 }
 
@@ -69,7 +69,7 @@ fn wizard_context_file_is_none_when_user_says_no() {
         .with_confirm(true);
 
     let dir = tempfile::tempdir().unwrap();
-    let output = interactive_config_wizard(dir.path(), &interactor).unwrap();
+    let output = interactive_config_wizard(dir.path(), &interactor, &WizardHints::none()).unwrap();
     assert_eq!(output.context_file, None);
 }
 
@@ -86,7 +86,7 @@ fn wizard_captures_commit_strategy_selection() {
         .with_confirm(true);
 
     let dir = tempfile::tempdir().unwrap();
-    let output = interactive_config_wizard(dir.path(), &interactor).unwrap();
+    let output = interactive_config_wizard(dir.path(), &interactor, &WizardHints::none()).unwrap();
     assert_eq!(output.commit_strategy, CommitStrategy::PerTicket);
 }
 
