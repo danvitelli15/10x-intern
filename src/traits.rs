@@ -10,11 +10,129 @@ pub struct Issue {
     pub labels: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommitStrategy {
     Direct,
-    FeatureBranch,
     PerTicket,
+    FeatureBranch,
+}
+
+impl CommitStrategy {
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::PerTicket => "per-ticket",
+            Self::FeatureBranch => "feature-branch",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Direct => "Direct",
+            Self::PerTicket => "Per Ticket",
+            Self::FeatureBranch => "Feature Branch",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Direct => "Commit directly to the current branch",
+            Self::PerTicket => "Create a commit per ticket on the current branch",
+            Self::FeatureBranch => "Create a dedicated branch per feature",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Direct, Self::PerTicket, Self::FeatureBranch]
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::all().iter().find(|v| v.key() == key).copied()
+    }
+}
+
+impl std::fmt::Display for CommitStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} — {}", self.label(), self.description())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueTrackerKind {
+    GitHub,
+}
+
+impl IssueTrackerKind {
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::GitHub => "github",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::GitHub => "GitHub",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::GitHub => "GitHub Issues via the gh CLI",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::GitHub]
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::all().iter().find(|v| v.key() == key).copied()
+    }
+}
+
+impl std::fmt::Display for IssueTrackerKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} — {}", self.label(), self.description())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentKind {
+    Local,
+}
+
+impl AgentKind {
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Local => "Local (Claude Code)",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Local => "Run Claude Code locally via the claude CLI",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Local]
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::all().iter().find(|v| v.key() == key).copied()
+    }
+}
+
+impl std::fmt::Display for AgentKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} — {}", self.label(), self.description())
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -1,4 +1,5 @@
 use intern::behaviors::{interactive_config_wizard, WizardOutput};
+use intern::traits::{CommitStrategy, IssueTrackerKind};
 use intern::workflows::{init_workflow, init_workflow_with_defaults};
 
 mod common;
@@ -65,25 +66,26 @@ fn wizard_captures_commit_strategy_selection() {
 
     let dir = tempfile::tempdir().unwrap();
     let output = interactive_config_wizard(dir.path(), &interactor).unwrap();
-    assert_eq!(output.commit_strategy, "per-ticket");
+    assert_eq!(output.commit_strategy, CommitStrategy::PerTicket);
 }
 
 #[test]
 fn wizard_output_defaults_uses_github_issue_tracker() {
     let output = WizardOutput::defaults();
-    assert_eq!(output.issue_tracker_kind, "github");
+    assert_eq!(output.issue_tracker_kind, IssueTrackerKind::GitHub);
 }
 
 #[test]
 fn wizard_output_defaults_uses_feature_branch_commit_strategy() {
     let output = WizardOutput::defaults();
-    assert_eq!(output.commit_strategy, "feature-branch");
+    assert_eq!(output.commit_strategy, CommitStrategy::FeatureBranch);
 }
 
 #[test]
 fn wizard_output_defaults_uses_local_agent() {
+    use intern::traits::AgentKind;
     let output = WizardOutput::defaults();
-    assert_eq!(output.agent_kind, "local");
+    assert_eq!(output.agent_kind, AgentKind::Local);
 }
 
 #[test]
@@ -99,7 +101,7 @@ fn scaffold_writes_issue_tracker_values_to_config() {
 #[test]
 fn scaffold_writes_commit_strategy_to_config() {
     let dir = tempfile::tempdir().unwrap();
-    let output = WizardOutput { commit_strategy: "per-ticket".to_string(), ..WizardOutput::defaults() };
+    let output = WizardOutput { commit_strategy: CommitStrategy::PerTicket, ..WizardOutput::defaults() };
     intern::behaviors::scaffold_intern_directory(dir.path(), &output).unwrap();
     let config = std::fs::read_to_string(dir.path().join(".intern/config.toml")).unwrap();
     assert!(config.contains("per-ticket"));

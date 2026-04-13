@@ -4,11 +4,11 @@ use crate::actions::{
     create_file, feature_review, generate_test_instructions, implement, plan_order, review,
 };
 use crate::context::{BudgetExhausted, Context};
-use crate::traits::IssueType;
+use crate::traits::{AgentKind, CommitStrategy, IssueTrackerKind, IssueType};
 
 pub trait UserInteractor {
     fn prompt_text(&self, question: &str, default: Option<&str>) -> Result<String>;
-    fn prompt_choice(&self, question: &str, choices: &[&str]) -> Result<usize>;
+    fn prompt_choice(&self, question: &str, choices: &[String]) -> Result<usize>;
     fn prompt_confirm(&self, question: &str, default: bool) -> Result<bool>;
 }
 
@@ -25,9 +25,9 @@ impl UserInteractor for TerminalInteractor {
         Ok(prompt.prompt()?)
     }
 
-    fn prompt_choice(&self, question: &str, choices: &[&str]) -> Result<usize> {
+    fn prompt_choice(&self, question: &str, choices: &[String]) -> Result<usize> {
         let answer = inquire::Select::new(question, choices.to_vec()).prompt()?;
-        Ok(choices.iter().position(|&c| c == answer).unwrap())
+        Ok(choices.iter().position(|c| c == &answer).unwrap())
     }
 
     fn prompt_confirm(&self, question: &str, default: bool) -> Result<bool> {
@@ -38,42 +38,81 @@ impl UserInteractor for TerminalInteractor {
 }
 
 pub struct WizardOutput {
-    pub issue_tracker_kind: String,
+    pub issue_tracker_kind: IssueTrackerKind,
     pub repo: String,
-    pub agent_kind: String,
+    pub agent_kind: AgentKind,
     pub settings_file: Option<String>,
     pub context_file: Option<String>,
-    pub commit_strategy: String,
+    pub commit_strategy: CommitStrategy,
 }
 
 impl WizardOutput {
     pub fn defaults() -> Self {
         Self {
-            issue_tracker_kind: "github".to_string(),
+            issue_tracker_kind: IssueTrackerKind::GitHub,
             repo: "owner/repo".to_string(),
-            agent_kind: "local".to_string(),
+            agent_kind: AgentKind::Local,
             settings_file: None,
             context_file: None,
-            commit_strategy: "feature-branch".to_string(),
+            commit_strategy: CommitStrategy::FeatureBranch,
         }
     }
 }
 
-const ISSUE_TRACKER_KINDS: &[&str] = &["github"];
-const AGENT_KINDS: &[&str] = &["local"];
-const COMMIT_STRATEGIES: &[&str] = &["direct", "per-ticket", "feature-branch"];
+fn choice_list<T: std::fmt::Display + Copy>(items: &[T]) -> Vec<String>
+where
+    T: HasDescription,
+{
+    items
+        .iter()
+        .map(|i| format!("{} — {}", i.label(), i.description()))
+        .collect()
+}
+
+trait HasDescription {
+    fn label(&self) -> &'static str;
+    fn description(&self) -> &'static str;
+}
+
+impl HasDescription for IssueTrackerKind {
+    fn label(&self) -> &'static str {
+        IssueTrackerKind::label(self)
+    }
+    fn description(&self) -> &'static str {
+        IssueTrackerKind::description(self)
+    }
+}
+
+impl HasDescription for AgentKind {
+    fn label(&self) -> &'static str {
+        AgentKind::label(self)
+    }
+    fn description(&self) -> &'static str {
+        AgentKind::description(self)
+    }
+}
+
+impl HasDescription for CommitStrategy {
+    fn label(&self) -> &'static str {
+        CommitStrategy::label(self)
+    }
+    fn description(&self) -> &'static str {
+        CommitStrategy::description(self)
+    }
+}
 
 pub fn interactive_config_wizard(
-    base_dir: &std::path::Path,
+    _base_dir: &std::path::Path,
     interactor: &dyn UserInteractor,
 ) -> Result<WizardOutput> {
-    let tracker_idx = interactor.prompt_choice("Issue tracker", ISSUE_TRACKER_KINDS)?;
-    let issue_tracker_kind = ISSUE_TRACKER_KINDS[tracker_idx].to_string();
+    let tracker_idx =
+        interactor.prompt_choice("Issue tracker", &choice_list(IssueTrackerKind::all()))?;
+    let issue_tracker_kind = IssueTrackerKind::all()[tracker_idx];
 
     let repo = interactor.prompt_text("Repository (owner/repo)", Some("owner/repo"))?;
 
-    let agent_idx = interactor.prompt_choice("Agent", AGENT_KINDS)?;
-    let agent_kind = AGENT_KINDS[agent_idx].to_string();
+    let agent_idx = interactor.prompt_choice("Agent", &choice_list(AgentKind::all()))?;
+    let agent_kind = AgentKind::all()[agent_idx];
 
     let settings_file = if interactor.prompt_confirm("Specify an agent settings file?", false)? {
         Some(interactor.prompt_text("Settings file path", Some(".claude/settings.json"))?)
@@ -88,8 +127,9 @@ pub fn interactive_config_wizard(
             None
         };
 
-    let strategy_idx = interactor.prompt_choice("Commit strategy", COMMIT_STRATEGIES)?;
-    let commit_strategy = COMMIT_STRATEGIES[strategy_idx].to_string();
+    let strategy_idx =
+        interactor.prompt_choice("Commit strategy", &choice_list(CommitStrategy::all()))?;
+    let commit_strategy = CommitStrategy::all()[strategy_idx];
 
     let output = WizardOutput {
         issue_tracker_kind,
@@ -103,7 +143,10 @@ pub fn interactive_config_wizard(
     interactor.prompt_confirm(
         &format!(
             "Settings look good?\n  issue_tracker: {} | repo: {} | agent: {} | commit_strategy: {}",
-            output.issue_tracker_kind, output.repo, output.agent_kind, output.commit_strategy
+            output.issue_tracker_kind.key(),
+            output.repo,
+            output.agent_kind.key(),
+            output.commit_strategy.key()
         ),
         true,
     )?;
@@ -147,12 +190,12 @@ fn generate_config_toml(wizard: &WizardOutput) -> String {
 
     lines.push(String::new());
     lines.push("[issue_tracker]".to_string());
-    lines.push(format!("kind = {:?}", wizard.issue_tracker_kind));
+    lines.push(format!("kind = {:?}", wizard.issue_tracker_kind.key()));
     lines.push(format!("repo = {:?}", wizard.repo));
 
     lines.push(String::new());
     lines.push("[agent]".to_string());
-    lines.push(format!("kind = {:?}", wizard.agent_kind));
+    lines.push(format!("kind = {:?}", wizard.agent_kind.key()));
     if let Some(ref sf) = wizard.settings_file {
         lines.push(format!("settings_file = {:?}", sf));
     }
@@ -160,7 +203,10 @@ fn generate_config_toml(wizard: &WizardOutput) -> String {
     lines.push(String::new());
     lines.push("[run]".to_string());
     lines.push("max_iterations = 100".to_string());
-    lines.push(format!("commit_strategy = {:?}", wizard.commit_strategy));
+    lines.push(format!(
+        "commit_strategy = {:?}",
+        wizard.commit_strategy.key()
+    ));
 
     lines.push(String::new());
     lines.join("\n")

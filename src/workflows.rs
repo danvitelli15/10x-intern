@@ -77,11 +77,8 @@ pub fn build_run_config(command: &Command, config: &Config) -> Result<RunConfig>
         Some(CommitStrategyArg::Direct) => CommitStrategy::Direct,
         Some(CommitStrategyArg::PerTicket) => CommitStrategy::PerTicket,
         Some(CommitStrategyArg::FeatureBranch) => CommitStrategy::FeatureBranch,
-        None => match config.run.commit_strategy.as_str() {
-            "direct" => CommitStrategy::Direct,
-            "per-ticket" => CommitStrategy::PerTicket,
-            _ => CommitStrategy::FeatureBranch,
-        },
+        None => CommitStrategy::from_key(&config.run.commit_strategy)
+            .unwrap_or(CommitStrategy::FeatureBranch),
     };
 
     Ok(RunConfig {

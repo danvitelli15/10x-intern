@@ -52,7 +52,7 @@ impl UserInteractor for StubInteractor {
             .expect("StubInteractor: no text response queued"))
     }
 
-    fn prompt_choice(&self, _question: &str, choices: &[&str]) -> Result<usize> {
+    fn prompt_choice(&self, _question: &str, choices: &[String]) -> Result<usize> {
         let idx = self.choice_responses.borrow_mut().pop_front()
             .expect("StubInteractor: no choice response queued");
         assert!(idx < choices.len(), "StubInteractor: choice index out of range");
