@@ -15,10 +15,16 @@
 | Term | Definition | Aliases to avoid |
 |---|---|---|
 | **Action** | A discrete, reusable operation that may be called from multiple places — always a pure function taking a `Context` or explicit parameters | Step, task, operation |
-| **Behavior** | A named grouping of actions that accomplishes a complete user-facing goal (e.g. `complete_ticket`, `complete_feature`, `init`) | Flow, process, pipeline |
-| **Workflow** | A composition of behaviors to accomplish a higher-order goal — not yet instantiated in the codebase | — |
+| **Behavior** | A named composition of actions (and other behaviors) that accomplishes a meaningful intermediate goal — not necessarily exposed at the CLI level | Flow, process, pipeline |
+| **Workflow** | The composition of behaviors triggered by a single CLI subcommand — the complete user-facing operation a subcommand performs | — |
 | **Context** | The struct that carries all dependencies (issue tracker, source control, runner, config) for a single execution run | Container, service locator |
 | **Budget** | The maximum number of agent invocations allowed in a run, enforced by `Context` | Limit, cap |
+
+## CLI surface
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Subcommand** | A named entry point in the CLI (e.g. `implement`, `clear`, `init`) — each subcommand triggers exactly one Workflow | Command, flag |
 
 ## Agent interaction
 
@@ -58,7 +64,10 @@
 ## Relationships
 
 - A **Feature** has one or more **child issues** (which are **Tickets** or nested **Features**)
-- A **Behavior** calls one or more **Actions**; actions do not call behaviors
+- A **Subcommand** triggers exactly one **Workflow**
+- A **Workflow** composes one or more **Behaviors**; a **Behavior** may compose other **Behaviors**
+- A **Behavior** calls one or more **Actions**; **Actions** do not call **Behaviors** or **Workflows**
+- Some **Behaviors** are internal-only and never directly exposed as a **Subcommand**
 - A **Prompt** is produced by rendering a **Prompt template** with issue data and **repo context**
 - An **Override** shadows the **Scaffold** for a specific prompt name; if no override exists, the behavior errors and instructs the user to run `intern init`
 - A **Ticket** produces a **FINDINGS** or **CLEAN** signal from the review **Action**
@@ -66,17 +75,16 @@
 
 ## Example dialogue
 
-> **Dev:** "So when we say `complete_ticket`, is that a **behavior** or an **action**?"
-> **Domain expert:** "A **behavior** — it groups the `implement`, `review`, and `generate_test_instructions` **actions** together into a complete user-facing goal."
-> **Dev:** "And if the review comes back with **FINDINGS**, what happens?"
-> **Domain expert:** "The **behavior** loops — it creates a **child issue** with the findings and runs `implement` again on the same **ticket**."
-> **Dev:** "What stops it from looping forever?"
-> **Domain expert:** "The **budget**. Once `Context` hits `max_iterations`, any further `run_agent` call returns `BudgetExhausted`, the **ticket** is **skipped**, and execution continues with the next item."
-> **Dev:** "What's the difference between a **ticket** being **skipped** vs a **HITL** issue?"
-> **Domain expert:** "A **HITL** issue is one a human intentionally flagged for manual handling — the agent never touches it. A **skipped** ticket is one the agent tried and couldn't finish within **budget**."
+> **Dev:** "So the `clear` subcommand calls `complete_ticket` directly?"
+> **Domain expert:** "No — the **subcommand** triggers the `clear` **workflow**, which calls `execute_ordered`, which calls `complete_ticket`. The **subcommand** doesn't know about `complete_ticket` at all."
+> **Dev:** "And `complete_ticket` — is that a **behavior** or a **workflow**?"
+> **Domain expert:** "A **behavior**. It groups the `implement`, `review`, and `generate_test_instructions` **actions** together. It's composable — `execute_ordered` calls it, and so does `complete_feature`. No **subcommand** calls it directly."
+> **Dev:** "What about `init`? That's both a **subcommand** and a function name."
+> **Domain expert:** "The **subcommand** triggers `init_workflow`. That workflow calls `scaffold_intern_directory`, which is the **behavior**. Today there's one behavior in that workflow. When we add the interactive config wizard, that becomes a second **behavior** in the same `init` **workflow** — the **subcommand** doesn't change."
+> **Dev:** "So the rule is: **subcommands** map to **workflows**, **workflows** compose **behaviors**, **behaviors** compose **actions**?"
+> **Domain expert:** "Exactly. And **behaviors** can also compose other **behaviors** — `complete_feature` calls `execute_ordered`, which calls `complete_ticket`. All of that is the **behavior** layer."
 
 ## Flagged ambiguities
 
-- **"issue" vs "ticket"**: Both are valid. **Ticket** is the broader colloquial term for any documented work item (in this project or a target repo). **Issue** is the GitHub-specific representation. In the codebase, `Ticket` as an `IssueType` variant means a leaf node — distinct from `Feature`. Context resolves the ambiguity: "ticket" in conversation rarely needs to be more precise than "a documented item of work."
-- **"behavior"**: not yet formalized in the codebase — lives conceptually as the pattern of functions in `orchestrator.rs`, but there is no `Behavior` trait or module yet. The user has flagged this as a forthcoming design discussion.
-- **"workflow"**: mentioned as a layer above behaviors but has no instantiation yet. Do not use this term for anything that already has a name.
+- **"issue" vs "ticket"**: Both are valid. **Ticket** is the broader colloquial term for any documented work item (in this project or a target repo). **Issue** is the GitHub-specific representation. In the codebase, `Ticket` as an `IssueType` variant means a leaf node — distinct from `Feature`. Context resolves the ambiguity.
+- **"command" vs "subcommand"**: Use **subcommand** — `intern` is the binary, `implement`/`clear`/`init` are subcommands. "Command" is too broad.
