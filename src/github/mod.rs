@@ -177,6 +177,138 @@ impl IssueTracker for GithubAdapter {
     }
 }
 
+#[cfg(test)]
+mod issue_tracker_tests {
+    use super::test_support::adapter;
+    use super::*;
+
+    #[test]
+    fn get_issue_parses_response() {
+        let json = r#"{
+            "number": 42,
+            "title": "Add user authentication",
+            "body": "We need auth",
+            "labels": [{"name": "feature"}, {"name": "aft"}]
+        }"#;
+        let (adapter, _) = adapter(json);
+        let issue = adapter.get_issue(42).unwrap();
+        assert_eq!(issue.id, 42);
+        assert_eq!(issue.title, "Add user authentication");
+        assert_eq!(issue.body, "We need auth");
+        assert_eq!(issue.labels, vec!["feature", "aft"]);
+    }
+
+    #[test]
+    fn get_children_parses_sub_issues() {
+        let json = r#"[
+            {"number": 10, "title": "Sub one", "body": "body", "labels": []},
+            {"number": 11, "title": "Sub two", "body": "body", "labels": [{"name": "aft"}]}
+        ]"#;
+        let (adapter, _) = adapter(json);
+        let issues = adapter.get_children(5).unwrap();
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].id, 10);
+        assert_eq!(issues[1].labels, vec!["aft"]);
+    }
+
+    #[test]
+    fn get_issues_by_label_parses_list() {
+        let json = r#"[
+            {"number": 1, "title": "First", "body": "body one", "labels": [{"name": "aft"}]},
+            {"number": 2, "title": "Second", "body": "body two", "labels": [{"name": "aft"}, {"name": "bug"}]}
+        ]"#;
+        let (adapter, _) = adapter(json);
+        let issues = adapter.get_issues_by_label("aft").unwrap();
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].id, 1);
+        assert_eq!(issues[1].labels, vec!["aft", "bug"]);
+    }
+
+    #[test]
+    fn claim_issue_posts_comment() {
+        let (adapter, calls) = adapter("");
+        adapter.claim_issue(42).unwrap();
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0][0], "gh");
+        assert_eq!(calls[0][1], "issue");
+        assert_eq!(calls[0][2], "comment");
+        assert_eq!(calls[0][3], "42");
+        assert!(calls[0].contains(&"--repo".to_string()));
+        assert!(calls[0].contains(&"owner/repo".to_string()));
+        assert!(calls[0].contains(&"--body".to_string()));
+    }
+
+    #[test]
+    fn complete_issue_adds_label() {
+        let (adapter, calls) = adapter("");
+        adapter.complete_issue(7).unwrap();
+        let calls = calls.borrow();
+        assert_eq!(calls[0][0], "gh");
+        assert_eq!(calls[0][1], "issue");
+        assert_eq!(calls[0][2], "edit");
+        assert_eq!(calls[0][3], "7");
+        assert!(calls[0].contains(&"--add-label".to_string()));
+        assert!(calls[0].contains(&"agent-complete".to_string()));
+    }
+
+    #[test]
+    fn skip_issue_adds_hitl_label() {
+        let (adapter, calls) = adapter("");
+        adapter.skip_issue(9).unwrap();
+        let calls = calls.borrow();
+        assert_eq!(calls[0][2], "edit");
+        assert_eq!(calls[0][3], "9");
+        assert!(calls[0].contains(&"--add-label".to_string()));
+        assert!(calls[0].contains(&"hitl".to_string()));
+    }
+
+    #[test]
+    fn post_comment_sends_body() {
+        let (adapter, calls) = adapter("");
+        adapter.post_comment(5, "hello from the agent").unwrap();
+        let calls = calls.borrow();
+        assert_eq!(calls[0][2], "comment");
+        assert_eq!(calls[0][3], "5");
+        assert!(calls[0].contains(&"--body".to_string()));
+        assert!(calls[0].contains(&"hello from the agent".to_string()));
+    }
+
+    #[test]
+    fn create_child_issue_creates_and_links() {
+        let url = "https://github.com/owner/repo/issues/99\n";
+        let (adapter, calls) = adapter(url);
+        let issue = adapter
+            .create_child_issue(1, "Child title", "Child body")
+            .unwrap();
+        let calls = calls.borrow();
+        assert!(calls[0].contains(&"create".to_string()));
+        assert!(calls[0].contains(&"Child title".to_string()));
+        assert!(calls[0].contains(&"Child body".to_string()));
+        assert!(calls[1].contains(&"api".to_string()));
+        assert!(calls[1].contains(&"/repos/owner/repo/issues/1/sub_issues".to_string()));
+        assert!(calls[1].contains(&"sub_issue_id=99".to_string()));
+        drop(calls);
+        assert_eq!(issue.id, 99);
+        assert_eq!(issue.title, "Child title");
+        assert_eq!(issue.body, "Child body");
+    }
+
+    #[test]
+    fn issue_type_returns_feature_when_labeled_feature() {
+        let json = r#"{"number": 1, "title": "T", "body": "B", "labels": [{"name": "feature"}]}"#;
+        let (adapter, _) = adapter(json);
+        assert!(matches!(adapter.issue_type(1).unwrap(), IssueType::Feature));
+    }
+
+    #[test]
+    fn issue_type_returns_ticket_when_no_feature_label() {
+        let json = r#"{"number": 1, "title": "T", "body": "B", "labels": [{"name": "bug"}]}"#;
+        let (adapter, _) = adapter(json);
+        assert!(matches!(adapter.issue_type(1).unwrap(), IssueType::Ticket));
+    }
+}
+
 impl RemoteClient for GithubAdapter {
     fn create_pr(&self, title: &str, body: &str, branch: &str) -> Result<String> {
         let url = self.runner.run(
@@ -191,184 +323,35 @@ impl RemoteClient for GithubAdapter {
 }
 
 #[cfg(test)]
-mod tests {
+mod remote_client_tests {
+    use super::test_support::adapter;
     use super::*;
-    use crate::test_utils::fake_runner;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    fn adapter(response: &str) -> (GithubAdapter, Rc<RefCell<Vec<Vec<String>>>>) {
-        let (runner, calls) = fake_runner(response);
-        (GithubAdapter::new("owner/repo", Box::new(runner)), calls)
-    }
-
-    #[test]
-    fn claim_issue_posts_comment() {
-        let (adapter, calls) = adapter("");
-
-        adapter.claim_issue(42).unwrap();
-
-        let calls = calls.borrow();
-        assert_eq!(calls.len(), 1);
-        // should be: gh issue comment 42 --repo owner/repo --body "..."
-        assert_eq!(calls[0][0], "gh");
-        assert_eq!(calls[0][1], "issue");
-        assert_eq!(calls[0][2], "comment");
-        assert_eq!(calls[0][3], "42");
-        assert!(calls[0].contains(&"--repo".to_string()));
-        assert!(calls[0].contains(&"owner/repo".to_string()));
-        assert!(calls[0].contains(&"--body".to_string()));
-    }
-
-    #[test]
-    fn get_issues_by_label_parses_list() {
-        let json = r#"[
-            {"number": 1, "title": "First", "body": "body one", "labels": [{"name": "aft"}]},
-            {"number": 2, "title": "Second", "body": "body two", "labels": [{"name": "aft"}, {"name": "bug"}]}
-        ]"#;
-
-        let (adapter, _) = adapter(json);
-        let issues = adapter.get_issues_by_label("aft").unwrap();
-
-        assert_eq!(issues.len(), 2);
-        assert_eq!(issues[0].id, 1);
-        assert_eq!(issues[1].labels, vec!["aft", "bug"]);
-    }
-
-    #[test]
-    fn complete_issue_adds_label() {
-        let (adapter, calls) = adapter("");
-
-        adapter.complete_issue(7).unwrap();
-
-        let calls = calls.borrow();
-        assert_eq!(calls[0][0], "gh");
-        assert_eq!(calls[0][1], "issue");
-        assert_eq!(calls[0][2], "edit");
-        assert_eq!(calls[0][3], "7");
-        assert!(calls[0].contains(&"--add-label".to_string()));
-        assert!(calls[0].contains(&"agent-complete".to_string()));
-    }
-
-    #[test]
-    fn skip_issue_adds_hitl_label() {
-        let (adapter, calls) = adapter("");
-
-        adapter.skip_issue(9).unwrap();
-
-        let calls = calls.borrow();
-        assert_eq!(calls[0][2], "edit");
-        assert_eq!(calls[0][3], "9");
-        assert!(calls[0].contains(&"--add-label".to_string()));
-        assert!(calls[0].contains(&"hitl".to_string()));
-    }
-
-    #[test]
-    fn post_comment_sends_body() {
-        let (adapter, calls) = adapter("");
-
-        adapter.post_comment(5, "hello from the agent").unwrap();
-
-        let calls = calls.borrow();
-        assert_eq!(calls[0][2], "comment");
-        assert_eq!(calls[0][3], "5");
-        assert!(calls[0].contains(&"--body".to_string()));
-        assert!(calls[0].contains(&"hello from the agent".to_string()));
-    }
-
-    #[test]
-    fn create_child_issue_creates_and_links() {
-        let url = "https://github.com/owner/repo/issues/99\n";
-        let (adapter, calls) = adapter(url);
-
-        let issue = adapter
-            .create_child_issue(1, "Child title", "Child body")
-            .unwrap();
-
-        let calls = calls.borrow();
-        // first call: gh issue create
-        assert!(calls[0].contains(&"create".to_string()));
-        assert!(calls[0].contains(&"Child title".to_string()));
-        assert!(calls[0].contains(&"Child body".to_string()));
-        // second call: gh api to link as sub-issue under parent 1
-        assert!(calls[1].contains(&"api".to_string()));
-        assert!(calls[1].contains(&"/repos/owner/repo/issues/1/sub_issues".to_string()));
-        assert!(calls[1].contains(&"sub_issue_id=99".to_string()));
-        drop(calls);
-
-        assert_eq!(issue.id, 99);
-        assert_eq!(issue.title, "Child title");
-        assert_eq!(issue.body, "Child body");
-    }
-
-    #[test]
-    fn get_children_parses_sub_issues() {
-        let json = r#"[
-            {"number": 10, "title": "Sub one", "body": "body", "labels": []},
-            {"number": 11, "title": "Sub two", "body": "body", "labels": [{"name": "aft"}]}
-        ]"#;
-
-        let (adapter, _) = adapter(json);
-        let issues = adapter.get_children(5).unwrap();
-
-        assert_eq!(issues.len(), 2);
-        assert_eq!(issues[0].id, 10);
-        assert_eq!(issues[1].labels, vec!["aft"]);
-    }
 
     #[test]
     fn create_pr_returns_url() {
         let url = "https://github.com/owner/repo/pull/5\n";
         let (adapter, calls) = adapter(url);
-
         let result = adapter
             .create_pr("My PR", "PR body", "feature/123")
             .unwrap();
-
         let calls = calls.borrow();
         assert!(calls[0].contains(&"create".to_string()));
         assert!(calls[0].contains(&"My PR".to_string()));
         assert!(calls[0].contains(&"feature/123".to_string()));
         drop(calls);
-
         assert_eq!(result, "https://github.com/owner/repo/pull/5");
     }
+}
 
-    #[test]
-    fn issue_type_returns_feature_when_labeled_feature() {
-        let json = r#"{"number": 1, "title": "T", "body": "B", "labels": [{"name": "feature"}]}"#;
-        let (adapter, _) = adapter(json);
+#[cfg(test)]
+mod test_support {
+    use super::*;
+    use crate::test_utils::fake_runner;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
-        let issue_type = adapter.issue_type(1).unwrap();
-
-        assert!(matches!(issue_type, IssueType::Feature));
-    }
-
-    #[test]
-    fn issue_type_returns_ticket_when_no_feature_label() {
-        let json = r#"{"number": 1, "title": "T", "body": "B", "labels": [{"name": "bug"}]}"#;
-        let (adapter, _) = adapter(json);
-
-        let issue_type = adapter.issue_type(1).unwrap();
-
-        assert!(matches!(issue_type, IssueType::Ticket));
-    }
-
-    #[test]
-    fn get_issue_parses_response() {
-        let json = r#"{
-            "number": 42,
-            "title": "Add user authentication",
-            "body": "We need auth",
-            "labels": [{"name": "feature"}, {"name": "aft"}]
-        }"#;
-
-        let (adapter, _) = adapter(json);
-        let issue = adapter.get_issue(42).unwrap();
-
-        assert_eq!(issue.id, 42);
-        assert_eq!(issue.title, "Add user authentication");
-        assert_eq!(issue.body, "We need auth");
-        assert_eq!(issue.labels, vec!["feature", "aft"]);
+    pub fn adapter(response: &str) -> (GithubAdapter, Rc<RefCell<Vec<Vec<String>>>>) {
+        let (runner, calls) = fake_runner(response);
+        (GithubAdapter::new("owner/repo", Box::new(runner)), calls)
     }
 }

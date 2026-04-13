@@ -1,7 +1,7 @@
 use anyhow::Result;
 use figment::{
-    providers::{Format, Toml},
     Figment,
+    providers::{Format, Toml},
 };
 use serde::Deserialize;
 
@@ -46,24 +46,8 @@ impl Default for RunDefaults {
     }
 }
 
-impl Config {
-    pub fn resolve_work_directory(&self) -> std::path::PathBuf {
-        match &self.work_directory {
-            Some(dir) => std::path::PathBuf::from(dir),
-            None => std::env::current_dir().unwrap_or_default(),
-        }
-    }
-
-    pub fn resolve_repo_context(&self) -> Result<String> {
-        match &self.context_file {
-            Some(path) => Ok(std::fs::read_to_string(path)?),
-            None => Ok(String::new()),
-        }
-    }
-}
-
 #[cfg(test)]
-mod tests {
+mod config_deserialization_tests {
     use super::*;
 
     #[test]
@@ -108,121 +92,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_work_directory_uses_config_value_when_set() {
-        let config = Config {
-            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
-            agent: AgentConfig { kind: "local".into(), settings_file: None },
-            run: RunDefaults::default(),
-            context_file: None,
-            work_directory: Some("/projects/myrepo".into()),
-        };
-        assert_eq!(config.resolve_work_directory(), std::path::PathBuf::from("/projects/myrepo"));
-    }
-
-    #[test]
-    fn resolve_work_directory_defaults_to_cwd_when_not_set() {
-        let config = Config {
-            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
-            agent: AgentConfig { kind: "local".into(), settings_file: None },
-            run: RunDefaults::default(),
-            context_file: None,
-            work_directory: None,
-        };
-        assert_eq!(config.resolve_work_directory(), std::env::current_dir().unwrap());
-    }
-
-    #[test]
-    fn resolve_repo_context_returns_file_contents_when_context_file_set() {
-        let file = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(file.path(), "use snake_case everywhere").unwrap();
-        let config = Config {
-            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
-            agent: AgentConfig { kind: "local".into(), settings_file: None },
-            run: RunDefaults::default(),
-            context_file: Some(file.path().to_string_lossy().into_owned()),
-            work_directory: None,
-        };
-        assert_eq!(config.resolve_repo_context().unwrap(), "use snake_case everywhere");
-    }
-
-    #[test]
-    fn resolve_repo_context_returns_empty_string_when_not_set() {
-        let config = Config {
-            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
-            agent: AgentConfig { kind: "local".into(), settings_file: None },
-            run: RunDefaults::default(),
-            context_file: None,
-            work_directory: None,
-        };
-        assert_eq!(config.resolve_repo_context().unwrap(), "");
-    }
-
-    #[test]
-    fn resolve_repo_context_errors_when_context_file_missing() {
-        let config = Config {
-            issue_tracker: IssueTrackerConfig { kind: "github".into(), repo: "o/r".into() },
-            agent: AgentConfig { kind: "local".into(), settings_file: None },
-            run: RunDefaults::default(),
-            context_file: Some("/nonexistent/path/context.md".into()),
-            work_directory: None,
-        };
-        assert!(config.resolve_repo_context().is_err());
-    }
-
-    #[test]
-    fn load_from_finds_intern_directory_config() {
-        let dir = tempfile::tempdir().unwrap();
-        let intern_dir = dir.path().join(".intern");
-        std::fs::create_dir_all(&intern_dir).unwrap();
-        std::fs::write(intern_dir.join("config.toml"), r#"
-            [issue_tracker]
-            kind = "github"
-            repo = "owner/repo"
-            [agent]
-            kind = "local"
-        "#).unwrap();
-        let config = Config::load_from(dir.path()).unwrap();
-        assert_eq!(config.issue_tracker.repo, "owner/repo");
-    }
-
-    #[test]
-    fn load_from_falls_back_to_legacy_intern_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(".intern.toml"), r#"
-            [issue_tracker]
-            kind = "github"
-            repo = "legacy/repo"
-            [agent]
-            kind = "local"
-        "#).unwrap();
-        let config = Config::load_from(dir.path()).unwrap();
-        assert_eq!(config.issue_tracker.repo, "legacy/repo");
-    }
-
-    #[test]
-    fn load_from_intern_directory_config_takes_precedence_over_legacy() {
-        let dir = tempfile::tempdir().unwrap();
-        let intern_dir = dir.path().join(".intern");
-        std::fs::create_dir_all(&intern_dir).unwrap();
-        std::fs::write(intern_dir.join("config.toml"), r#"
-            [issue_tracker]
-            kind = "github"
-            repo = "new/repo"
-            [agent]
-            kind = "local"
-        "#).unwrap();
-        std::fs::write(dir.path().join(".intern.toml"), r#"
-            [issue_tracker]
-            kind = "github"
-            repo = "legacy/repo"
-            [agent]
-            kind = "local"
-        "#).unwrap();
-        let config = Config::load_from(dir.path()).unwrap();
-        assert_eq!(config.issue_tracker.repo, "new/repo");
-    }
-
-    #[test]
     fn config_context_file_defaults_to_none() {
         let toml = r#"
             [issue_tracker]
@@ -233,6 +102,107 @@ mod tests {
         "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.context_file, None);
+    }
+}
+
+impl Config {
+    pub fn resolve_work_directory(&self) -> std::path::PathBuf {
+        match &self.work_directory {
+            Some(dir) => std::path::PathBuf::from(dir),
+            None => std::env::current_dir().unwrap_or_default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod resolve_work_directory_tests {
+    use super::*;
+
+    fn config(work_directory: Option<&str>) -> Config {
+        Config {
+            issue_tracker: IssueTrackerConfig {
+                kind: "github".into(),
+                repo: "o/r".into(),
+            },
+            agent: AgentConfig {
+                kind: "local".into(),
+                settings_file: None,
+            },
+            run: RunDefaults::default(),
+            context_file: None,
+            work_directory: work_directory.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn resolve_work_directory_uses_config_value_when_set() {
+        assert_eq!(
+            config(Some("/projects/myrepo")).resolve_work_directory(),
+            std::path::PathBuf::from("/projects/myrepo")
+        );
+    }
+
+    #[test]
+    fn resolve_work_directory_defaults_to_cwd_when_not_set() {
+        assert_eq!(
+            config(None).resolve_work_directory(),
+            std::env::current_dir().unwrap()
+        );
+    }
+}
+
+impl Config {
+    pub fn resolve_repo_context(&self) -> Result<String> {
+        match &self.context_file {
+            Some(path) => Ok(std::fs::read_to_string(path)?),
+            None => Ok(String::new()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod resolve_repo_context_tests {
+    use super::*;
+
+    fn config(context_file: Option<&str>) -> Config {
+        Config {
+            issue_tracker: IssueTrackerConfig {
+                kind: "github".into(),
+                repo: "o/r".into(),
+            },
+            agent: AgentConfig {
+                kind: "local".into(),
+                settings_file: None,
+            },
+            run: RunDefaults::default(),
+            context_file: context_file.map(Into::into),
+            work_directory: None,
+        }
+    }
+
+    #[test]
+    fn resolve_repo_context_returns_file_contents_when_context_file_set() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "use snake_case everywhere").unwrap();
+        let config = config(Some(file.path().to_str().unwrap()));
+        assert_eq!(
+            config.resolve_repo_context().unwrap(),
+            "use snake_case everywhere"
+        );
+    }
+
+    #[test]
+    fn resolve_repo_context_returns_empty_string_when_not_set() {
+        assert_eq!(config(None).resolve_repo_context().unwrap(), "");
+    }
+
+    #[test]
+    fn resolve_repo_context_errors_when_context_file_missing() {
+        assert!(
+            config(Some("/nonexistent/path/context.md"))
+                .resolve_repo_context()
+                .is_err()
+        );
     }
 }
 
@@ -260,5 +230,79 @@ impl Config {
             .extract()?;
 
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod load_from_tests {
+    use super::*;
+
+    #[test]
+    fn load_from_finds_intern_directory_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let intern_dir = dir.path().join(".intern");
+        std::fs::create_dir_all(&intern_dir).unwrap();
+        std::fs::write(
+            intern_dir.join("config.toml"),
+            r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "owner/repo"
+            [agent]
+            kind = "local"
+        "#,
+        )
+        .unwrap();
+        let config = Config::load_from(dir.path()).unwrap();
+        assert_eq!(config.issue_tracker.repo, "owner/repo");
+    }
+
+    #[test]
+    fn load_from_falls_back_to_legacy_intern_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".intern.toml"),
+            r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "legacy/repo"
+            [agent]
+            kind = "local"
+        "#,
+        )
+        .unwrap();
+        let config = Config::load_from(dir.path()).unwrap();
+        assert_eq!(config.issue_tracker.repo, "legacy/repo");
+    }
+
+    #[test]
+    fn load_from_intern_directory_config_takes_precedence_over_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        let intern_dir = dir.path().join(".intern");
+        std::fs::create_dir_all(&intern_dir).unwrap();
+        std::fs::write(
+            intern_dir.join("config.toml"),
+            r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "new/repo"
+            [agent]
+            kind = "local"
+        "#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".intern.toml"),
+            r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "legacy/repo"
+            [agent]
+            kind = "local"
+        "#,
+        )
+        .unwrap();
+        let config = Config::load_from(dir.path()).unwrap();
+        assert_eq!(config.issue_tracker.repo, "new/repo");
     }
 }
