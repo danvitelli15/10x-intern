@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::orchestrator::Context;
+use crate::context::Context;
 use crate::traits::Issue;
 
 pub fn create_file(path: &Path, content: &str) -> Result<()> {
@@ -148,7 +148,7 @@ fn build_test_instructions_prompt(issue: &Issue, diff: &str, work_directory: &Pa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestrator::Context;
+    use crate::context::Context;
     use crate::traits::{
         AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
         RemoteClient, RunConfig, SourceControl,
