@@ -54,6 +54,25 @@
 | **Complete** | An issue whose implementation was accepted by the review action | Done, resolved, closed |
 | **Skipped** | An issue the agent abandoned, typically due to budget exhaustion or a second failed feature review | Abandoned, failed |
 
+## Source control
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **Merge strategy** *(new)* | Config value that controls branch topology and PR lifecycle for a run — one of `Direct`, `PerTicket`, or `FeatureBranch` | Commit strategy (old name — avoid), integration strategy |
+| **Direct** *(new)* | A **merge strategy** where the agent works on the current branch with no new branch created and no PR opened | — |
+| **PerTicket** *(new)* | A **merge strategy** where each ticket gets its own branch and its own PR | — |
+| **FeatureBranch** *(new)* | A **merge strategy** where all tickets in an `execute_ordered` run share one branch; a single PR is opened after all tickets complete | — |
+| **Base branch** *(new)* | The branch a working branch is forked from, used as the base for `diff_from_base` in review — configured in `[source_control]` | Main, master, trunk |
+| **Setup workspace** *(new)* | The precursor **behavior** step that prepares the working environment before implementation begins — a no-op today, will provision **worktrees** in future | Workspace init, branch setup |
+| **Worktree** *(new)* | A `git worktree`-isolated working directory for a single ticket run — planned but not yet implemented | Workspace, working copy |
+| **PR step** *(new)* | The terminal phase of `complete_ticket` that opens a pull request — may be suppressed when called from `execute_ordered` under `FeatureBranch` | Create PR |
+
+## Result signals — source control *(new)*
+
+| Term | Definition | Aliases to avoid |
+|---|---|---|
+| **branchCreated** *(new)* | An `<branchCreated>…</branchCreated>` tag emitted by the agent in its output, naming the branch it created — used as a fallback when `current_branch()` returns something unexpected | Branch signal, branch tag |
+
 ## Configuration
 
 | Term | Definition | Aliases to avoid |
@@ -72,6 +91,10 @@
 - An **Override** shadows the **Scaffold** for a specific prompt name; if no override exists, the behavior errors and instructs the user to run `intern init`
 - A **Ticket** produces a **FINDINGS** or **CLEAN** signal from the review **Action**
 - A **Feature** produces an **IN_SCOPE_FINDINGS** or **CLEAN** signal from the feature review **Action**
+- **Setup workspace** precedes `implement` in every **behavior** that calls it
+- Under `FeatureBranch`, `execute_ordered` suppresses the **PR step** per ticket and opens one PR after all tickets complete
+- The agent emits a **branchCreated** tag; the orchestrator validates it against `current_branch()` post-implement
+- **Merge strategy** and **base branch** are configured together in `[source_control]`
 
 ## Example dialogue
 
@@ -88,3 +111,5 @@
 
 - **"issue" vs "ticket"**: Both are valid. **Ticket** is the broader colloquial term for any documented work item (in this project or a target repo). **Issue** is the GitHub-specific representation. In the codebase, `Ticket` as an `IssueType` variant means a leaf node — distinct from `Feature`. Context resolves the ambiguity.
 - **"command" vs "subcommand"**: Use **subcommand** — `intern` is the binary, `implement`/`clear`/`init` are subcommands. "Command" is too broad.
+- **"commit_strategy" vs "merge_strategy"**: The config field is being renamed from `commit_strategy` to `merge_strategy`. Avoid `commit_strategy` going forward — it conflates commit frequency (owned by the agent) with branch topology (owned by the orchestrator). Use **merge strategy**.
+- **"integration_strategy"**: Was considered as a rename candidate for `commit_strategy`. Rejected in favour of **merge strategy**. Do not use.
