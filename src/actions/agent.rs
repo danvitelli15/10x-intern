@@ -236,10 +236,7 @@ mod tests {
 
     #[test]
     fn scaffold_implement_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("implement.md"), include_str!("../../scaffold/prompts/implement.md")).unwrap();
+        let dir = make_prompt_dir_with("implement", include_str!("../../scaffold/prompts/implement.md"));
         let result = load_prompt(dir.path(), "implement").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
@@ -248,10 +245,7 @@ mod tests {
 
     #[test]
     fn scaffold_review_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("review.md"), include_str!("../../scaffold/prompts/review.md")).unwrap();
+        let dir = make_prompt_dir_with("review", include_str!("../../scaffold/prompts/review.md"));
         let result = load_prompt(dir.path(), "review").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
@@ -260,10 +254,7 @@ mod tests {
 
     #[test]
     fn scaffold_feature_review_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("feature_review.md"), include_str!("../../scaffold/prompts/feature_review.md")).unwrap();
+        let dir = make_prompt_dir_with("feature_review", include_str!("../../scaffold/prompts/feature_review.md"));
         let result = load_prompt(dir.path(), "feature_review").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
@@ -272,10 +263,7 @@ mod tests {
 
     #[test]
     fn scaffold_plan_order_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("plan_order.md"), include_str!("../../scaffold/prompts/plan_order.md")).unwrap();
+        let dir = make_prompt_dir_with("plan_order", include_str!("../../scaffold/prompts/plan_order.md"));
         let result = load_prompt(dir.path(), "plan_order").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
@@ -284,10 +272,7 @@ mod tests {
 
     #[test]
     fn scaffold_test_instructions_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("test_instructions.md"), include_str!("../../scaffold/prompts/test_instructions.md")).unwrap();
+        let dir = make_prompt_dir_with("test_instructions", include_str!("../../scaffold/prompts/test_instructions.md"));
         let result = load_prompt(dir.path(), "test_instructions").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
