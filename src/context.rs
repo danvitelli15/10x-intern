@@ -62,42 +62,8 @@ impl Context {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::traits::{AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue,
-        IssueTracker, IssueType, RemoteClient, RunConfig, SourceControl};
-
-    struct StubIssueTracker;
-    impl IssueTracker for StubIssueTracker {
-        fn get_issue(&self, id: u64) -> Result<Issue> {
-            Ok(Issue { id, title: "".into(), body: "".into(), labels: vec![] })
-        }
-        fn get_children(&self, _: u64) -> Result<Vec<Issue>> { Ok(vec![]) }
-        fn get_issues_by_label(&self, _: &str) -> Result<Vec<Issue>> { Ok(vec![]) }
-        fn claim_issue(&self, _: u64) -> Result<()> { Ok(()) }
-        fn complete_issue(&self, _: u64) -> Result<()> { Ok(()) }
-        fn skip_issue(&self, _: u64) -> Result<()> { Ok(()) }
-        fn post_comment(&self, _: u64, _: &str) -> Result<()> { Ok(()) }
-        fn create_child_issue(&self, _: u64, _: &str, _: &str) -> Result<Issue> { unimplemented!() }
-        fn issue_type(&self, _: u64) -> Result<IssueType> { Ok(IssueType::Ticket) }
-    }
-
-    struct StubSourceControl;
-    impl SourceControl for StubSourceControl {
-        fn create_branch(&self, _: &str) -> Result<()> { Ok(()) }
-        fn current_branch(&self) -> Result<String> { Ok("main".into()) }
-        fn diff_from_base(&self, _: &str) -> Result<String> { Ok("".into()) }
-        fn stage(&self, _: Option<&[&str]>) -> Result<()> { Ok(()) }
-        fn commit(&self, _: &str) -> Result<()> { Ok(()) }
-    }
-
-    struct StubRemoteClient;
-    impl RemoteClient for StubRemoteClient {
-        fn create_pr(&self, _: &str, _: &str, _: &str) -> Result<String> { Ok("".into()) }
-    }
-
-    struct StubEventSink;
-    impl EventSink for StubEventSink {
-        fn emit(&self, _: Event) {}
-    }
+    use crate::test_utils::{StubEventSink, StubIssueTracker, StubRemoteClient, StubSourceControl};
+    use crate::traits::{AgentOutput, AgentRunner, CommitStrategy, RunConfig};
 
     struct StubRunner;
     impl AgentRunner for StubRunner {

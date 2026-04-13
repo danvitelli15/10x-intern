@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use anyhow::Result;
 
-use crate::traits::CommandRunner;
+use crate::traits::{
+    CommandRunner, Event, EventSink, Issue, IssueTracker, IssueType, RemoteClient, SourceControl,
+};
 
 /// A test double for CommandRunner.
 /// Returns a canned response and records every call for assertion.
@@ -44,4 +46,38 @@ pub fn fake_failing_runner() -> (FakeCommandRunner, Rc<RefCell<Vec<Vec<String>>>
     let calls = Rc::new(RefCell::new(vec![]));
     let runner = FakeCommandRunner { calls: calls.clone(), response: String::new(), fail: true };
     (runner, calls)
+}
+
+pub struct StubIssueTracker;
+impl IssueTracker for StubIssueTracker {
+    fn get_issue(&self, id: u64) -> Result<Issue> {
+        Ok(Issue { id, title: "T".into(), body: "B".into(), labels: vec![] })
+    }
+    fn get_children(&self, _: u64) -> Result<Vec<Issue>> { Ok(vec![]) }
+    fn get_issues_by_label(&self, _: &str) -> Result<Vec<Issue>> { Ok(vec![]) }
+    fn claim_issue(&self, _: u64) -> Result<()> { Ok(()) }
+    fn complete_issue(&self, _: u64) -> Result<()> { Ok(()) }
+    fn skip_issue(&self, _: u64) -> Result<()> { Ok(()) }
+    fn post_comment(&self, _: u64, _: &str) -> Result<()> { Ok(()) }
+    fn create_child_issue(&self, _: u64, _: &str, _: &str) -> Result<Issue> { unimplemented!() }
+    fn issue_type(&self, _: u64) -> Result<IssueType> { Ok(IssueType::Ticket) }
+}
+
+pub struct StubSourceControl;
+impl SourceControl for StubSourceControl {
+    fn create_branch(&self, _: &str) -> Result<()> { Ok(()) }
+    fn current_branch(&self) -> Result<String> { Ok("main".into()) }
+    fn diff_from_base(&self, _: &str) -> Result<String> { Ok("".into()) }
+    fn stage(&self, _: Option<&[&str]>) -> Result<()> { Ok(()) }
+    fn commit(&self, _: &str) -> Result<()> { Ok(()) }
+}
+
+pub struct StubRemoteClient;
+impl RemoteClient for StubRemoteClient {
+    fn create_pr(&self, _: &str, _: &str, _: &str) -> Result<String> { Ok("".into()) }
+}
+
+pub struct StubEventSink;
+impl EventSink for StubEventSink {
+    fn emit(&self, _: Event) {}
 }

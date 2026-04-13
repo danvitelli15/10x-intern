@@ -138,44 +138,8 @@ fn build_test_instructions_prompt(issue: &Issue, diff: &str, work_directory: &Pa
 mod tests {
     use super::*;
     use crate::context::Context;
-    use crate::traits::{
-        AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
-        RemoteClient, RunConfig, SourceControl,
-    };
-
-    struct StubIssueTracker;
-    impl IssueTracker for StubIssueTracker {
-        fn get_issue(&self, id: u64) -> anyhow::Result<Issue> {
-            Ok(Issue { id, title: "T".into(), body: "B".into(), labels: vec![] })
-        }
-        fn get_children(&self, _: u64) -> anyhow::Result<Vec<Issue>> { Ok(vec![]) }
-        fn get_issues_by_label(&self, _: &str) -> anyhow::Result<Vec<Issue>> { Ok(vec![]) }
-        fn claim_issue(&self, _: u64) -> anyhow::Result<()> { Ok(()) }
-        fn complete_issue(&self, _: u64) -> anyhow::Result<()> { Ok(()) }
-        fn skip_issue(&self, _: u64) -> anyhow::Result<()> { Ok(()) }
-        fn post_comment(&self, _: u64, _: &str) -> anyhow::Result<()> { Ok(()) }
-        fn create_child_issue(&self, _: u64, _: &str, _: &str) -> anyhow::Result<Issue> { unimplemented!() }
-        fn issue_type(&self, _: u64) -> anyhow::Result<IssueType> { Ok(IssueType::Ticket) }
-    }
-
-    struct StubSourceControl;
-    impl SourceControl for StubSourceControl {
-        fn create_branch(&self, _: &str) -> anyhow::Result<()> { Ok(()) }
-        fn current_branch(&self) -> anyhow::Result<String> { Ok("main".into()) }
-        fn diff_from_base(&self, _: &str) -> anyhow::Result<String> { Ok("".into()) }
-        fn stage(&self, _: Option<&[&str]>) -> anyhow::Result<()> { Ok(()) }
-        fn commit(&self, _: &str) -> anyhow::Result<()> { Ok(()) }
-    }
-
-    struct StubRemoteClient;
-    impl RemoteClient for StubRemoteClient {
-        fn create_pr(&self, _: &str, _: &str, _: &str) -> anyhow::Result<String> { Ok("".into()) }
-    }
-
-    struct StubEventSink;
-    impl EventSink for StubEventSink {
-        fn emit(&self, _: Event) {}
-    }
+    use crate::test_utils::{StubEventSink, StubIssueTracker, StubRemoteClient, StubSourceControl};
+    use crate::traits::{AgentOutput, AgentRunner, CommitStrategy, RunConfig};
 
     struct FixedRunner { stdout: String }
     impl AgentRunner for FixedRunner {
