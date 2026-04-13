@@ -6,46 +6,6 @@ use serde::Deserialize;
 use crate::context::Context;
 use crate::traits::Issue;
 
-pub fn create_file(path: &Path, content: &str) -> Result<()> {
-    if path.exists() {
-        anyhow::bail!("file already exists: {}", path.display());
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, content)?;
-    Ok(())
-}
-
-fn load_prompt(base_dir: &Path, name: &str) -> Result<String> {
-    let path = base_dir.join(".intern/prompts").join(format!("{name}.md"));
-    if !path.exists() {
-        anyhow::bail!(
-            "missing prompt file: {} — run 'intern init' to scaffold defaults",
-            path.display()
-        );
-    }
-    let raw = std::fs::read_to_string(&path)?;
-    Ok(strip_prompt_docs(&raw))
-}
-
-fn strip_prompt_docs(s: &str) -> String {
-    let mut result = s.to_string();
-    while let (Some(start), Some(end)) = (
-        result.find("<strip-before-prompting>"),
-        result.find("</strip-before-prompting>"),
-    ) {
-        let end_tag = "</strip-before-prompting>".len();
-        result = format!("{}{}", &result[..start], &result[end + end_tag..]);
-    }
-    result.trim_start().to_string()
-}
-
-#[derive(Deserialize)]
-struct OrderedItem {
-    id: u64,
-}
-
 pub fn plan_order(issues: &[Issue], ctx: &Context) -> Result<Vec<u64>> {
     let prompt = build_plan_order_prompt(issues, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
@@ -98,6 +58,35 @@ pub fn generate_test_instructions(issue_id: u64, ctx: &Context) -> Result<()> {
     let prompt = build_test_instructions_prompt(&issue, &diff, &ctx.config.work_directory)?;
     ctx.run_agent(&prompt)?;
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct OrderedItem {
+    id: u64,
+}
+
+fn load_prompt(base_dir: &Path, name: &str) -> Result<String> {
+    let path = base_dir.join(".intern/prompts").join(format!("{name}.md"));
+    if !path.exists() {
+        anyhow::bail!(
+            "missing prompt file: {} — run 'intern init' to scaffold defaults",
+            path.display()
+        );
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    Ok(strip_prompt_docs(&raw))
+}
+
+fn strip_prompt_docs(s: &str) -> String {
+    let mut result = s.to_string();
+    while let (Some(start), Some(end)) = (
+        result.find("<strip-before-prompting>"),
+        result.find("</strip-before-prompting>"),
+    ) {
+        let end_tag = "</strip-before-prompting>".len();
+        result = format!("{}{}", &result[..start], &result[end + end_tag..]);
+    }
+    result.trim_start().to_string()
 }
 
 fn build_implement_prompt(issue: &Issue, repo_context: &str, work_directory: &Path) -> Result<String> {
@@ -218,6 +207,149 @@ mod tests {
         (ctx, dir)
     }
 
+    fn make_prompt_dir_with(name: &str, content: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join(format!("{name}.md")), content).unwrap();
+        dir
+    }
+
+    // --- strip_prompt_docs unit tests ---
+
+    #[test]
+    fn strip_prompt_docs_removes_tagged_section() {
+        let input = "<strip-before-prompting>\n# comment\n</strip-before-prompting>\n\nContent.";
+        let result = strip_prompt_docs(input);
+        assert!(!result.contains("<strip-before-prompting>"));
+        assert!(!result.contains("# comment"));
+        assert!(result.contains("Content."));
+    }
+
+    #[test]
+    fn strip_prompt_docs_handles_multiple_sections() {
+        let input = "<strip-before-prompting>\n# first\n</strip-before-prompting>\n\nA.\n\n<strip-before-prompting>\n# second\n</strip-before-prompting>\n\nB.";
+        let result = strip_prompt_docs(input);
+        assert!(!result.contains("<strip-before-prompting>"));
+        assert!(!result.contains("# first"));
+        assert!(!result.contains("# second"));
+        assert!(result.contains("A."));
+        assert!(result.contains("B."));
+    }
+
+    // --- load_prompt pipeline tests ---
+
+    #[test]
+    fn load_prompt_uses_override_file_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join("implement.md"), "custom prompt").unwrap();
+        let result = load_prompt(dir.path(), "implement").unwrap();
+        assert_eq!(result, "custom prompt");
+    }
+
+    #[test]
+    fn load_prompt_errors_when_file_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = load_prompt(dir.path(), "implement");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_prompt_applies_stripping() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join("implement.md"),
+            "<strip-before-prompting>\n# docs\n</strip-before-prompting>\n\nContent.").unwrap();
+        let result = load_prompt(dir.path(), "implement").unwrap();
+        assert!(!result.contains("# docs"));
+        assert!(result.contains("Content."));
+    }
+
+    // --- scaffold file pipeline tests ---
+
+    #[test]
+    fn scaffold_implement_loads_and_strips_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join("implement.md"), include_str!("../../scaffold/prompts/implement.md")).unwrap();
+        let result = load_prompt(dir.path(), "implement").unwrap();
+        assert!(!result.contains("<strip-before-prompting>"));
+        assert!(!result.contains("Available variables"));
+        assert!(result.contains("{{issue_id}}"));
+    }
+
+    #[test]
+    fn scaffold_review_loads_and_strips_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join("review.md"), include_str!("../../scaffold/prompts/review.md")).unwrap();
+        let result = load_prompt(dir.path(), "review").unwrap();
+        assert!(!result.contains("<strip-before-prompting>"));
+        assert!(!result.contains("Available variables"));
+        assert!(result.contains("{{diff}}"));
+    }
+
+    #[test]
+    fn scaffold_feature_review_loads_and_strips_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join("feature_review.md"), include_str!("../../scaffold/prompts/feature_review.md")).unwrap();
+        let result = load_prompt(dir.path(), "feature_review").unwrap();
+        assert!(!result.contains("<strip-before-prompting>"));
+        assert!(!result.contains("Available variables"));
+        assert!(result.contains("{{diff}}"));
+    }
+
+    #[test]
+    fn scaffold_plan_order_loads_and_strips_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join("plan_order.md"), include_str!("../../scaffold/prompts/plan_order.md")).unwrap();
+        let result = load_prompt(dir.path(), "plan_order").unwrap();
+        assert!(!result.contains("<strip-before-prompting>"));
+        assert!(!result.contains("Available variables"));
+        assert!(result.contains("{{issues_list}}"));
+    }
+
+    #[test]
+    fn scaffold_test_instructions_loads_and_strips_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join("test_instructions.md"), include_str!("../../scaffold/prompts/test_instructions.md")).unwrap();
+        let result = load_prompt(dir.path(), "test_instructions").unwrap();
+        assert!(!result.contains("<strip-before-prompting>"));
+        assert!(!result.contains("Available variables"));
+        assert!(result.contains("{{issue_id}}"));
+    }
+
+    // --- prompt builder tests ---
+
+    #[test]
+    fn implement_prompt_includes_repo_context() {
+        let dir = make_prompt_dir_with("implement", "{{repo_context}}\n{{issue_id}}");
+        let issue = Issue { id: 1, title: "T".into(), body: "B".into(), labels: vec![] };
+        let prompt = build_implement_prompt(&issue, "use snake_case everywhere", dir.path()).unwrap();
+        assert!(prompt.contains("use snake_case everywhere"));
+    }
+
+    #[test]
+    fn implement_prompt_with_empty_repo_context_does_not_panic() {
+        let dir = make_prompt_dir_with("implement", "{{repo_context}}\n{{issue_id}}");
+        let issue = Issue { id: 1, title: "T".into(), body: "B".into(), labels: vec![] };
+        let prompt = build_implement_prompt(&issue, "", dir.path()).unwrap();
+        assert!(!prompt.is_empty());
+    }
+
+    // --- action tests ---
+
     #[test]
     fn feature_review_returns_true_when_agent_outputs_in_scope_findings() {
         let (ctx, _dir) = test_context("Analysis...\n<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>");
@@ -270,168 +402,5 @@ mod tests {
     fn review_does_not_false_positive_on_untagged_findings() {
         let (ctx, _dir) = test_context("I found several FINDINGS in the analysis.");
         assert!(!review(1, &ctx).unwrap());
-    }
-
-    #[test]
-    fn load_prompt_uses_override_file_when_present() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("implement.md"), "custom prompt").unwrap();
-        let result = load_prompt(dir.path(), "implement").unwrap();
-        assert_eq!(result, "custom prompt");
-    }
-
-    #[test]
-    fn load_prompt_errors_when_file_not_found() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = load_prompt(dir.path(), "implement");
-        assert!(result.is_err());
-    }
-
-    // --- strip_prompt_docs unit tests ---
-
-    #[test]
-    fn strip_prompt_docs_removes_tagged_section() {
-        let input = "<strip-before-prompting>\n# comment\n</strip-before-prompting>\n\nContent.";
-        let result = strip_prompt_docs(input);
-        assert!(!result.contains("<strip-before-prompting>"));
-        assert!(!result.contains("# comment"));
-        assert!(result.contains("Content."));
-    }
-
-    #[test]
-    fn strip_prompt_docs_handles_multiple_sections() {
-        let input = "<strip-before-prompting>\n# first\n</strip-before-prompting>\n\nA.\n\n<strip-before-prompting>\n# second\n</strip-before-prompting>\n\nB.";
-        let result = strip_prompt_docs(input);
-        assert!(!result.contains("<strip-before-prompting>"));
-        assert!(!result.contains("# first"));
-        assert!(!result.contains("# second"));
-        assert!(result.contains("A."));
-        assert!(result.contains("B."));
-    }
-
-    // --- load_prompt pipeline test ---
-
-    #[test]
-    fn load_prompt_applies_stripping() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("implement.md"),
-            "<strip-before-prompting>\n# docs\n</strip-before-prompting>\n\nContent.").unwrap();
-        let result = load_prompt(dir.path(), "implement").unwrap();
-        assert!(!result.contains("# docs"));
-        assert!(result.contains("Content."));
-    }
-
-    // --- scaffold file pipeline tests ---
-
-    #[test]
-    fn scaffold_implement_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("implement.md"), include_str!("../scaffold/prompts/implement.md")).unwrap();
-        let result = load_prompt(dir.path(), "implement").unwrap();
-        assert!(!result.contains("<strip-before-prompting>"));
-        assert!(!result.contains("Available variables"));
-        assert!(result.contains("{{issue_id}}"));
-    }
-
-    #[test]
-    fn scaffold_review_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("review.md"), include_str!("../scaffold/prompts/review.md")).unwrap();
-        let result = load_prompt(dir.path(), "review").unwrap();
-        assert!(!result.contains("<strip-before-prompting>"));
-        assert!(!result.contains("Available variables"));
-        assert!(result.contains("{{diff}}"));
-    }
-
-    #[test]
-    fn scaffold_feature_review_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("feature_review.md"), include_str!("../scaffold/prompts/feature_review.md")).unwrap();
-        let result = load_prompt(dir.path(), "feature_review").unwrap();
-        assert!(!result.contains("<strip-before-prompting>"));
-        assert!(!result.contains("Available variables"));
-        assert!(result.contains("{{diff}}"));
-    }
-
-    #[test]
-    fn scaffold_plan_order_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("plan_order.md"), include_str!("../scaffold/prompts/plan_order.md")).unwrap();
-        let result = load_prompt(dir.path(), "plan_order").unwrap();
-        assert!(!result.contains("<strip-before-prompting>"));
-        assert!(!result.contains("Available variables"));
-        assert!(result.contains("{{issues_list}}"));
-    }
-
-    #[test]
-    fn scaffold_test_instructions_loads_and_strips_cleanly() {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("test_instructions.md"), include_str!("../scaffold/prompts/test_instructions.md")).unwrap();
-        let result = load_prompt(dir.path(), "test_instructions").unwrap();
-        assert!(!result.contains("<strip-before-prompting>"));
-        assert!(!result.contains("Available variables"));
-        assert!(result.contains("{{issue_id}}"));
-    }
-
-    fn make_prompt_dir_with(name: &str, content: &str) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join(format!("{name}.md")), content).unwrap();
-        dir
-    }
-
-    #[test]
-    fn implement_prompt_includes_repo_context() {
-        let dir = make_prompt_dir_with("implement", "{{repo_context}}\n{{issue_id}}");
-        let issue = Issue { id: 1, title: "T".into(), body: "B".into(), labels: vec![] };
-        let prompt = build_implement_prompt(&issue, "use snake_case everywhere", dir.path()).unwrap();
-        assert!(prompt.contains("use snake_case everywhere"));
-    }
-
-    #[test]
-    fn implement_prompt_with_empty_repo_context_does_not_panic() {
-        let dir = make_prompt_dir_with("implement", "{{repo_context}}\n{{issue_id}}");
-        let issue = Issue { id: 1, title: "T".into(), body: "B".into(), labels: vec![] };
-        let prompt = build_implement_prompt(&issue, "", dir.path()).unwrap();
-        assert!(!prompt.is_empty());
-    }
-
-    #[test]
-    fn create_file_writes_content_to_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("output.txt");
-        create_file(&path, "hello").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
-    }
-
-    #[test]
-    fn create_file_errors_if_file_already_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("output.txt");
-        std::fs::write(&path, "existing").unwrap();
-        assert!(create_file(&path, "new content").is_err());
-    }
-
-    #[test]
-    fn create_file_creates_parent_directories() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a/b/c/output.txt");
-        create_file(&path, "hello").unwrap();
-        assert!(path.exists());
     }
 }

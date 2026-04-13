@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::behaviors::{complete_ticket, execute_ordered, scaffold_intern_directory};
+use crate::behaviors::{complete_ticket, execute_ordered, interactive_config_wizard, scaffold_intern_directory, UserInteractor, WizardOutput};
 use crate::cli::{Command, CommitStrategyArg};
 use crate::config::Config;
 use crate::context::Context;
@@ -11,8 +11,13 @@ use crate::reporter::log_reporter::LogReporter;
 use crate::runner::LocalRunner;
 use crate::traits::{CommitStrategy, RunConfig};
 
-pub fn init_workflow(base_dir: &std::path::Path) -> Result<()> {
-    scaffold_intern_directory(base_dir)
+pub fn init_workflow(base_dir: &std::path::Path, interactor: &dyn UserInteractor) -> Result<()> {
+    let wizard_output = interactive_config_wizard(base_dir, interactor)?;
+    scaffold_intern_directory(base_dir, &wizard_output)
+}
+
+pub fn init_workflow_with_defaults(base_dir: &std::path::Path) -> Result<()> {
+    scaffold_intern_directory(base_dir, &WizardOutput::defaults())
 }
 
 pub fn implement_workflow(issue_id: u64, ctx: &Context) -> Result<()> {
@@ -65,7 +70,7 @@ pub fn build_run_config(command: &Command, config: &Config) -> Result<RunConfig>
             (*dry_run, *max_iterations, commit_strategy.clone())
         }
         Command::Review { dry_run, .. } => (*dry_run, None, None),
-        Command::Init => unreachable!(),
+        Command::Init { .. } => unreachable!(),
     };
 
     let commit_strategy = match commit_strategy_override {

@@ -53,5 +53,9 @@ pub enum Command {
         dry_run: bool,
     },
     /// Scaffold .intern/config.toml and default prompt files
-    Init,
+    Init {
+        /// Use all defaults without prompting
+        #[arg(long)]
+        defaults: bool,
+    },
 }

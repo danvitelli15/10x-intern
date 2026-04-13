@@ -5,11 +5,64 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use anyhow::Result;
+use intern::behaviors::UserInteractor;
 use intern::context::Context;
 use intern::traits::{
     AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
     RemoteClient, RunConfig, SourceControl,
 };
+
+// --- Stub interactor ---
+
+pub struct StubInteractor {
+    pub text_responses: RefCell<VecDeque<String>>,
+    pub choice_responses: RefCell<VecDeque<usize>>,
+    pub confirm_responses: RefCell<VecDeque<bool>>,
+}
+
+impl StubInteractor {
+    pub fn new() -> Self {
+        Self {
+            text_responses: RefCell::new(VecDeque::new()),
+            choice_responses: RefCell::new(VecDeque::new()),
+            confirm_responses: RefCell::new(VecDeque::new()),
+        }
+    }
+
+    pub fn with_text(self, response: &str) -> Self {
+        self.text_responses.borrow_mut().push_back(response.to_string());
+        self
+    }
+
+    pub fn with_choice(self, index: usize) -> Self {
+        self.choice_responses.borrow_mut().push_back(index);
+        self
+    }
+
+    pub fn with_confirm(self, response: bool) -> Self {
+        self.confirm_responses.borrow_mut().push_back(response);
+        self
+    }
+}
+
+impl UserInteractor for StubInteractor {
+    fn prompt_text(&self, _question: &str, default: Option<&str>) -> Result<String> {
+        Ok(self.text_responses.borrow_mut().pop_front()
+            .or_else(|| default.map(|s| s.to_string()))
+            .expect("StubInteractor: no text response queued"))
+    }
+
+    fn prompt_choice(&self, _question: &str, choices: &[&str]) -> Result<usize> {
+        let idx = self.choice_responses.borrow_mut().pop_front()
+            .expect("StubInteractor: no choice response queued");
+        assert!(idx < choices.len(), "StubInteractor: choice index out of range");
+        Ok(idx)
+    }
+
+    fn prompt_confirm(&self, _question: &str, default: bool) -> Result<bool> {
+        Ok(self.confirm_responses.borrow_mut().pop_front().unwrap_or(default))
+    }
+}
 
 // --- Fake issue tracker ---
 
