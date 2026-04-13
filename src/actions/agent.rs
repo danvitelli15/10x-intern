@@ -13,6 +13,30 @@ pub fn plan_order(issues: &[Issue], ctx: &Context) -> Result<Vec<u64>> {
     Ok(items.into_iter().map(|item| item.id).collect())
 }
 
+#[cfg(test)]
+mod plan_order_tests {
+    use super::*;
+    use super::test_support::test_context;
+
+    #[test]
+    fn plan_order_parses_agent_json_into_ordered_ids() {
+        let issues = vec![
+            Issue { id: 1, title: "First".into(), body: "".into(), labels: vec![] },
+            Issue { id: 2, title: "Second".into(), body: "".into(), labels: vec![] },
+        ];
+        let (ctx, _dir) = test_context(r#"[{"id": 2}, {"id": 1}]"#);
+        let order = plan_order(&issues, &ctx).unwrap();
+        assert_eq!(order, vec![2, 1]);
+    }
+
+    #[test]
+    fn plan_order_returns_error_for_invalid_json() {
+        let issues = vec![Issue { id: 1, title: "T".into(), body: "".into(), labels: vec![] }];
+        let (ctx, _dir) = test_context("I think issue 2 should go first, then issue 1.");
+        assert!(plan_order(&issues, &ctx).is_err());
+    }
+}
+
 pub fn implement(issue_id: u64, ctx: &Context) -> Result<()> {
     let issue = ctx.issues.get_issue(issue_id)?;
 
@@ -44,12 +68,60 @@ pub fn review(issue_id: u64, ctx: &Context) -> Result<bool> {
     Ok(output.stdout.contains("<reviewResult>FINDINGS</reviewResult>"))
 }
 
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    use super::test_support::test_context;
+
+    #[test]
+    fn review_returns_true_when_agent_outputs_findings() {
+        let (ctx, _dir) = test_context("Some analysis...\n<reviewResult>FINDINGS</reviewResult>");
+        assert!(review(1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn review_returns_false_when_agent_outputs_clean() {
+        let (ctx, _dir) = test_context("Looks good.\n<reviewResult>CLEAN</reviewResult>");
+        assert!(!review(1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn review_does_not_false_positive_on_untagged_findings() {
+        let (ctx, _dir) = test_context("I found several FINDINGS in the analysis.");
+        assert!(!review(1, &ctx).unwrap());
+    }
+}
+
 pub fn feature_review(issue_id: u64, ctx: &Context) -> Result<bool> {
     let issue = ctx.issues.get_issue(issue_id)?;
     let diff = ctx.source_control.diff_from_base("main")?;
     let prompt = build_feature_review_prompt(&issue, &diff, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
     Ok(output.stdout.contains("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>"))
+}
+
+#[cfg(test)]
+mod feature_review_tests {
+    use super::*;
+    use super::test_support::test_context;
+
+    #[test]
+    fn feature_review_returns_true_when_agent_outputs_in_scope_findings() {
+        let (ctx, _dir) = test_context("Analysis...\n<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>");
+        assert!(feature_review(1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn feature_review_returns_false_when_agent_outputs_clean() {
+        let (ctx, _dir) = test_context("Looks good.\n<featureReviewResult>CLEAN</featureReviewResult>");
+        assert!(!feature_review(1, &ctx).unwrap());
+    }
+
+    #[test]
+    fn feature_review_does_not_false_positive_on_untagged_in_scope_findings() {
+        let (ctx, _dir) = test_context("I found IN_SCOPE_FINDINGS in the codebase.");
+        assert!(!feature_review(1, &ctx).unwrap());
+    }
 }
 
 pub fn generate_test_instructions(issue_id: u64, ctx: &Context) -> Result<()> {
@@ -65,18 +137,6 @@ struct OrderedItem {
     id: u64,
 }
 
-fn load_prompt(base_dir: &Path, name: &str) -> Result<String> {
-    let path = base_dir.join(".intern/prompts").join(format!("{name}.md"));
-    if !path.exists() {
-        anyhow::bail!(
-            "missing prompt file: {} — run 'intern init' to scaffold defaults",
-            path.display()
-        );
-    }
-    let raw = std::fs::read_to_string(&path)?;
-    Ok(strip_prompt_docs(&raw))
-}
-
 fn strip_prompt_docs(s: &str) -> String {
     let mut result = s.to_string();
     while let (Some(start), Some(end)) = (
@@ -89,97 +149,9 @@ fn strip_prompt_docs(s: &str) -> String {
     result.trim_start().to_string()
 }
 
-fn build_implement_prompt(issue: &Issue, repo_context: &str, work_directory: &Path) -> Result<String> {
-    let template = load_prompt(work_directory, "implement")?;
-    Ok(template
-        .replace("{{issue_id}}", &issue.id.to_string())
-        .replace("{{issue_title}}", &issue.title)
-        .replace("{{issue_body}}", &issue.body)
-        .replace("{{repo_context}}", repo_context))
-}
-
-fn build_plan_order_prompt(issues: &[Issue], work_directory: &Path) -> Result<String> {
-    let template = load_prompt(work_directory, "plan_order")?;
-    let issues_list = issues.iter()
-        .map(|i| format!("### Issue #{}: {}\n{}", i.id, i.title, i.body))
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    Ok(template.replace("{{issues_list}}", &issues_list))
-}
-
-fn build_feature_review_prompt(issue: &Issue, diff: &str, work_directory: &Path) -> Result<String> {
-    let template = load_prompt(work_directory, "feature_review")?;
-    Ok(template
-        .replace("{{issue_id}}", &issue.id.to_string())
-        .replace("{{issue_title}}", &issue.title)
-        .replace("{{issue_body}}", &issue.body)
-        .replace("{{diff}}", diff))
-}
-
-fn build_review_prompt(issue: &Issue, diff: &str, work_directory: &Path) -> Result<String> {
-    let template = load_prompt(work_directory, "review")?;
-    Ok(template
-        .replace("{{issue_id}}", &issue.id.to_string())
-        .replace("{{issue_title}}", &issue.title)
-        .replace("{{issue_body}}", &issue.body)
-        .replace("{{diff}}", diff))
-}
-
-fn build_test_instructions_prompt(issue: &Issue, diff: &str, work_directory: &Path) -> Result<String> {
-    let template = load_prompt(work_directory, "test_instructions")?;
-    Ok(template
-        .replace("{{issue_id}}", &issue.id.to_string())
-        .replace("{{issue_title}}", &issue.title)
-        .replace("{{issue_body}}", &issue.body)
-        .replace("{{diff}}", diff))
-}
-
 #[cfg(test)]
-mod tests {
+mod strip_prompt_docs_tests {
     use super::*;
-    use crate::context::Context;
-    use crate::test_utils::{StubEventSink, StubIssueTracker, StubRemoteClient, StubSourceControl};
-    use crate::traits::{AgentOutput, AgentRunner, CommitStrategy, RunConfig};
-
-    struct FixedRunner { stdout: String }
-    impl AgentRunner for FixedRunner {
-        fn run(&self, _: &str, _: &RunConfig) -> anyhow::Result<AgentOutput> {
-            Ok(AgentOutput { stdout: self.stdout.clone(), success: true })
-        }
-    }
-
-    fn make_all_prompts_dir() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        for name in &["implement", "review", "feature_review", "plan_order", "test_instructions"] {
-            std::fs::write(prompts_dir.join(format!("{name}.md")), "{{issue_id}} {{issue_title}} {{issue_body}} {{diff}} {{issues_list}} {{repo_context}}").unwrap();
-        }
-        dir
-    }
-
-    fn test_context(stdout: &str) -> (Context, tempfile::TempDir) {
-        let dir = make_all_prompts_dir();
-        let ctx = Context::new(
-            Box::new(StubIssueTracker),
-            Box::new(StubSourceControl),
-            Box::new(StubRemoteClient),
-            Box::new(FixedRunner { stdout: stdout.to_string() }),
-            Box::new(StubEventSink),
-            RunConfig { max_iterations: 10, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
-        );
-        (ctx, dir)
-    }
-
-    fn make_prompt_dir_with(name: &str, content: &str) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let prompts_dir = dir.path().join(".intern/prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join(format!("{name}.md")), content).unwrap();
-        dir
-    }
-
-    // --- strip_prompt_docs unit tests ---
 
     #[test]
     fn strip_prompt_docs_removes_tagged_section() {
@@ -200,8 +172,24 @@ mod tests {
         assert!(result.contains("A."));
         assert!(result.contains("B."));
     }
+}
 
-    // --- load_prompt pipeline tests ---
+fn load_prompt(base_dir: &Path, name: &str) -> Result<String> {
+    let path = base_dir.join(".intern/prompts").join(format!("{name}.md"));
+    if !path.exists() {
+        anyhow::bail!(
+            "missing prompt file: {} — run 'intern init' to scaffold defaults",
+            path.display()
+        );
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    Ok(strip_prompt_docs(&raw))
+}
+
+#[cfg(test)]
+mod load_prompt_tests {
+    use super::*;
+    use super::test_support::make_prompt_dir_with;
 
     #[test]
     fn load_prompt_uses_override_file_when_present() {
@@ -231,8 +219,6 @@ mod tests {
         assert!(!result.contains("# docs"));
         assert!(result.contains("Content."));
     }
-
-    // --- scaffold file pipeline tests ---
 
     #[test]
     fn scaffold_implement_loads_and_strips_cleanly() {
@@ -278,8 +264,21 @@ mod tests {
         assert!(!result.contains("Available variables"));
         assert!(result.contains("{{issue_id}}"));
     }
+}
 
-    // --- prompt builder tests ---
+fn build_implement_prompt(issue: &Issue, repo_context: &str, work_directory: &Path) -> Result<String> {
+    let template = load_prompt(work_directory, "implement")?;
+    Ok(template
+        .replace("{{issue_id}}", &issue.id.to_string())
+        .replace("{{issue_title}}", &issue.title)
+        .replace("{{issue_body}}", &issue.body)
+        .replace("{{repo_context}}", repo_context))
+}
+
+#[cfg(test)]
+mod build_implement_prompt_tests {
+    use super::*;
+    use super::test_support::make_prompt_dir_with;
 
     #[test]
     fn implement_prompt_includes_repo_context() {
@@ -296,60 +295,85 @@ mod tests {
         let prompt = build_implement_prompt(&issue, "", dir.path()).unwrap();
         assert!(!prompt.is_empty());
     }
+}
 
-    // --- action tests ---
+fn build_plan_order_prompt(issues: &[Issue], work_directory: &Path) -> Result<String> {
+    let template = load_prompt(work_directory, "plan_order")?;
+    let issues_list = issues.iter()
+        .map(|i| format!("### Issue #{}: {}\n{}", i.id, i.title, i.body))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    Ok(template.replace("{{issues_list}}", &issues_list))
+}
 
-    #[test]
-    fn feature_review_returns_true_when_agent_outputs_in_scope_findings() {
-        let (ctx, _dir) = test_context("Analysis...\n<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>");
-        assert!(feature_review(1, &ctx).unwrap());
+fn build_feature_review_prompt(issue: &Issue, diff: &str, work_directory: &Path) -> Result<String> {
+    let template = load_prompt(work_directory, "feature_review")?;
+    Ok(template
+        .replace("{{issue_id}}", &issue.id.to_string())
+        .replace("{{issue_title}}", &issue.title)
+        .replace("{{issue_body}}", &issue.body)
+        .replace("{{diff}}", diff))
+}
+
+fn build_review_prompt(issue: &Issue, diff: &str, work_directory: &Path) -> Result<String> {
+    let template = load_prompt(work_directory, "review")?;
+    Ok(template
+        .replace("{{issue_id}}", &issue.id.to_string())
+        .replace("{{issue_title}}", &issue.title)
+        .replace("{{issue_body}}", &issue.body)
+        .replace("{{diff}}", diff))
+}
+
+fn build_test_instructions_prompt(issue: &Issue, diff: &str, work_directory: &Path) -> Result<String> {
+    let template = load_prompt(work_directory, "test_instructions")?;
+    Ok(template
+        .replace("{{issue_id}}", &issue.id.to_string())
+        .replace("{{issue_title}}", &issue.title)
+        .replace("{{issue_body}}", &issue.body)
+        .replace("{{diff}}", diff))
+}
+
+#[cfg(test)]
+mod test_support {
+    use crate::context::Context;
+    use crate::test_utils::{StubEventSink, StubIssueTracker, StubRemoteClient, StubSourceControl};
+    use crate::traits::{AgentOutput, AgentRunner, CommitStrategy, RunConfig};
+
+    pub struct FixedRunner { pub stdout: String }
+    impl AgentRunner for FixedRunner {
+        fn run(&self, _: &str, _: &RunConfig) -> anyhow::Result<AgentOutput> {
+            Ok(AgentOutput { stdout: self.stdout.clone(), success: true })
+        }
     }
 
-    #[test]
-    fn feature_review_returns_false_when_agent_outputs_clean() {
-        let (ctx, _dir) = test_context("Looks good.\n<featureReviewResult>CLEAN</featureReviewResult>");
-        assert!(!feature_review(1, &ctx).unwrap());
+    pub fn make_all_prompts_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        for name in &["implement", "review", "feature_review", "plan_order", "test_instructions"] {
+            std::fs::write(prompts_dir.join(format!("{name}.md")), "{{issue_id}} {{issue_title}} {{issue_body}} {{diff}} {{issues_list}} {{repo_context}}").unwrap();
+        }
+        dir
     }
 
-    #[test]
-    fn feature_review_does_not_false_positive_on_untagged_in_scope_findings() {
-        let (ctx, _dir) = test_context("I found IN_SCOPE_FINDINGS in the codebase.");
-        assert!(!feature_review(1, &ctx).unwrap());
+    pub fn test_context(stdout: &str) -> (Context, tempfile::TempDir) {
+        let dir = make_all_prompts_dir();
+        let ctx = Context::new(
+            Box::new(StubIssueTracker),
+            Box::new(StubSourceControl),
+            Box::new(StubRemoteClient),
+            Box::new(FixedRunner { stdout: stdout.to_string() }),
+            Box::new(StubEventSink),
+            RunConfig { max_iterations: 10, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
+        );
+        (ctx, dir)
     }
 
-    #[test]
-    fn plan_order_parses_agent_json_into_ordered_ids() {
-        let issues = vec![
-            Issue { id: 1, title: "First".into(), body: "".into(), labels: vec![] },
-            Issue { id: 2, title: "Second".into(), body: "".into(), labels: vec![] },
-        ];
-        let (ctx, _dir) = test_context(r#"[{"id": 2}, {"id": 1}]"#);
-        let order = plan_order(&issues, &ctx).unwrap();
-        assert_eq!(order, vec![2, 1]);
-    }
-
-    #[test]
-    fn plan_order_returns_error_for_invalid_json() {
-        let issues = vec![Issue { id: 1, title: "T".into(), body: "".into(), labels: vec![] }];
-        let (ctx, _dir) = test_context("I think issue 2 should go first, then issue 1.");
-        assert!(plan_order(&issues, &ctx).is_err());
-    }
-
-    #[test]
-    fn review_returns_true_when_agent_outputs_findings() {
-        let (ctx, _dir) = test_context("Some analysis...\n<reviewResult>FINDINGS</reviewResult>");
-        assert!(review(1, &ctx).unwrap());
-    }
-
-    #[test]
-    fn review_returns_false_when_agent_outputs_clean() {
-        let (ctx, _dir) = test_context("Looks good.\n<reviewResult>CLEAN</reviewResult>");
-        assert!(!review(1, &ctx).unwrap());
-    }
-
-    #[test]
-    fn review_does_not_false_positive_on_untagged_findings() {
-        let (ctx, _dir) = test_context("I found several FINDINGS in the analysis.");
-        assert!(!review(1, &ctx).unwrap());
+    pub fn make_prompt_dir_with(name: &str, content: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let prompts_dir = dir.path().join(".intern/prompts");
+        std::fs::create_dir_all(&prompts_dir).unwrap();
+        std::fs::write(prompts_dir.join(format!("{name}.md")), content).unwrap();
+        dir
     }
 }
