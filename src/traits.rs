@@ -11,6 +11,49 @@ pub struct Issue {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceControlKind {
+    Git,
+    None,
+}
+
+impl SourceControlKind {
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::Git => "git",
+            Self::None => "none",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Git => "Git",
+            Self::None => "None",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Git => "Version control via git",
+            Self::None => "Skip version control — changes are not committed",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Git, Self::None]
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::all().iter().find(|v| v.key() == key).copied()
+    }
+}
+
+impl std::fmt::Display for SourceControlKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} — {}", self.label(), self.description())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommitStrategy {
     Direct,
     PerTicket,

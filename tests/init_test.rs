@@ -1,14 +1,32 @@
 use intern::behaviors::{interactive_config_wizard, WizardOutput};
-use intern::traits::{CommitStrategy, IssueTrackerKind};
+use intern::traits::{CommitStrategy, IssueTrackerKind, SourceControlKind};
 use intern::workflows::{init_workflow, init_workflow_with_defaults};
 
 mod common;
+
+#[test]
+fn wizard_captures_source_control_kind() {
+    let interactor = common::StubInteractor::new()
+        .with_choice(0)          // issue tracker: github
+        .with_text("owner/repo") // repo
+        .with_choice(1)          // source control: none (index 1)
+        .with_choice(0)          // agent: local
+        .with_confirm(false)     // settings file: no
+        .with_confirm(false)     // context file: no
+        .with_choice(0)          // commit strategy: direct
+        .with_confirm(true);     // summary
+
+    let dir = tempfile::tempdir().unwrap();
+    let output = interactive_config_wizard(dir.path(), &interactor).unwrap();
+    assert_eq!(output.source_control_kind, SourceControlKind::None);
+}
 
 #[test]
 fn wizard_captures_repo_from_user_input() {
     let interactor = common::StubInteractor::new()
         .with_choice(0)          // issue tracker kind: github
         .with_text("myorg/myrepo")  // repo slug
+        .with_choice(0)          // source control: git
         .with_choice(0)          // agent kind: local
         .with_confirm(false)     // settings file: no
         .with_confirm(false)     // context file: no
@@ -25,6 +43,7 @@ fn wizard_captures_context_file_when_user_says_yes() {
     let interactor = common::StubInteractor::new()
         .with_choice(0)             // issue tracker: github
         .with_text("owner/repo")    // repo
+        .with_choice(0)             // source control: git
         .with_choice(0)             // agent: local
         .with_confirm(false)        // settings file: no
         .with_confirm(true)         // context file: yes
@@ -40,9 +59,10 @@ fn wizard_captures_context_file_when_user_says_yes() {
 #[test]
 fn wizard_context_file_is_none_when_user_says_no() {
     let interactor = common::StubInteractor::new()
-        .with_choice(0)
+        .with_choice(0)             // issue tracker: github
         .with_text("owner/repo")
-        .with_choice(0)
+        .with_choice(0)             // source control: git
+        .with_choice(0)             // agent: local
         .with_confirm(false)        // settings file: no
         .with_confirm(false)        // context file: no
         .with_choice(2)
@@ -56,11 +76,12 @@ fn wizard_context_file_is_none_when_user_says_no() {
 #[test]
 fn wizard_captures_commit_strategy_selection() {
     let interactor = common::StubInteractor::new()
-        .with_choice(0)
+        .with_choice(0)             // issue tracker: github
         .with_text("owner/repo")
-        .with_choice(0)
-        .with_confirm(false)
-        .with_confirm(false)
+        .with_choice(0)             // source control: git
+        .with_choice(0)             // agent: local
+        .with_confirm(false)        // settings file: no
+        .with_confirm(false)        // context file: no
         .with_choice(1)             // commit strategy: per-ticket (index 1)
         .with_confirm(true);
 
@@ -153,6 +174,7 @@ fn init_workflow_runs_wizard_and_writes_its_output_to_config() {
     let interactor = common::StubInteractor::new()
         .with_choice(0)                 // issue tracker: github
         .with_text("acme/widgets")      // repo
+        .with_choice(0)                 // source control: git
         .with_choice(0)                 // agent: local
         .with_confirm(false)            // settings file: no
         .with_confirm(false)            // context file: no

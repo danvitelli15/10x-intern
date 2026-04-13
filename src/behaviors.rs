@@ -4,7 +4,7 @@ use crate::actions::{
     create_file, feature_review, generate_test_instructions, implement, plan_order, review,
 };
 use crate::context::{BudgetExhausted, Context};
-use crate::traits::{AgentKind, CommitStrategy, IssueTrackerKind, IssueType};
+use crate::traits::{AgentKind, CommitStrategy, IssueTrackerKind, IssueType, SourceControlKind};
 
 pub trait UserInteractor {
     fn prompt_text(&self, question: &str, default: Option<&str>) -> Result<String>;
@@ -40,6 +40,7 @@ impl UserInteractor for TerminalInteractor {
 pub struct WizardOutput {
     pub issue_tracker_kind: IssueTrackerKind,
     pub repo: String,
+    pub source_control_kind: SourceControlKind,
     pub agent_kind: AgentKind,
     pub settings_file: Option<String>,
     pub context_file: Option<String>,
@@ -51,6 +52,7 @@ impl WizardOutput {
         Self {
             issue_tracker_kind: IssueTrackerKind::GitHub,
             repo: "owner/repo".to_string(),
+            source_control_kind: SourceControlKind::Git,
             agent_kind: AgentKind::Local,
             settings_file: None,
             context_file: None,
@@ -92,6 +94,11 @@ impl HasDescription for AgentKind {
     }
 }
 
+impl HasDescription for SourceControlKind {
+    fn label(&self) -> &'static str { SourceControlKind::label(self) }
+    fn description(&self) -> &'static str { SourceControlKind::description(self) }
+}
+
 impl HasDescription for CommitStrategy {
     fn label(&self) -> &'static str {
         CommitStrategy::label(self)
@@ -110,6 +117,9 @@ pub fn interactive_config_wizard(
     let issue_tracker_kind = IssueTrackerKind::all()[tracker_idx];
 
     let repo = interactor.prompt_text("Repository (owner/repo)", Some("owner/repo"))?;
+
+    let sc_idx = interactor.prompt_choice("Source control", &choice_list(SourceControlKind::all()))?;
+    let source_control_kind = SourceControlKind::all()[sc_idx];
 
     let agent_idx = interactor.prompt_choice("Agent", &choice_list(AgentKind::all()))?;
     let agent_kind = AgentKind::all()[agent_idx];
@@ -134,6 +144,7 @@ pub fn interactive_config_wizard(
     let output = WizardOutput {
         issue_tracker_kind,
         repo,
+        source_control_kind,
         agent_kind,
         settings_file,
         context_file,
@@ -192,6 +203,10 @@ fn generate_config_toml(wizard: &WizardOutput) -> String {
     lines.push("[issue_tracker]".to_string());
     lines.push(format!("kind = {:?}", wizard.issue_tracker_kind.key()));
     lines.push(format!("repo = {:?}", wizard.repo));
+
+    lines.push(String::new());
+    lines.push("[source_control]".to_string());
+    lines.push(format!("kind = {:?}", wizard.source_control_kind.key()));
 
     lines.push(String::new());
     lines.push("[agent]".to_string());
