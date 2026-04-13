@@ -23,13 +23,23 @@ fn make_issue(id: u64, labels: Vec<&str>) -> Issue {
     }
 }
 
-fn run_config() -> RunConfig {
+fn make_prompts_dir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let prompts_dir = dir.path().join(".intern/prompts");
+    std::fs::create_dir_all(&prompts_dir).unwrap();
+    for name in &["implement", "review", "feature_review", "plan_order", "test_instructions"] {
+        std::fs::write(prompts_dir.join(format!("{name}.md")), "{{issue_id}} {{issue_title}} {{issue_body}} {{diff}} {{issues_list}} {{repo_context}}").unwrap();
+    }
+    dir
+}
+
+fn run_config_with_dir(dir: &tempfile::TempDir) -> RunConfig {
     RunConfig {
         max_iterations: 10,
         commit_strategy: CommitStrategy::Direct,
         dry_run: false,
         repo_context: String::new(),
-        work_directory: std::path::PathBuf::from("."),
+        work_directory: dir.path().to_path_buf(),
     }
 }
 
@@ -161,26 +171,30 @@ impl EventSink for FakeEventSink {
     fn emit(&self, _event: Event) {}
 }
 
-fn make_context(tracker: FakeIssueTracker, runner: FakeRunner) -> Context {
-    Context::new(
+fn make_context(tracker: FakeIssueTracker, runner: FakeRunner) -> (Context, tempfile::TempDir) {
+    let dir = make_prompts_dir();
+    let ctx = Context::new(
         Box::new(tracker),
         Box::new(FakeSourceControl),
         Box::new(FakeRemoteClient),
         Box::new(runner),
         Box::new(FakeEventSink),
-        run_config(),
-    )
+        run_config_with_dir(&dir),
+    );
+    (ctx, dir)
 }
 
-fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner, max_iterations: u32) -> Context {
-    Context::new(
+fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner, max_iterations: u32) -> (Context, tempfile::TempDir) {
+    let dir = make_prompts_dir();
+    let ctx = Context::new(
         Box::new(tracker),
         Box::new(FakeSourceControl),
         Box::new(FakeRemoteClient),
         Box::new(runner),
         Box::new(FakeEventSink),
-        RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new(), work_directory: std::path::PathBuf::from(".") },
-    )
+        RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
+    );
+    (ctx, dir)
 }
 
 // --- Tests (new interface) ---
@@ -189,8 +203,9 @@ fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner, ma
 fn implement_fn_claims_issue_before_running_agent() {
     let (tracker, claimed, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, _) = FakeRunner::succeeds();
+    let (ctx, _dir) = make_context(tracker, runner);
 
-    implement(42, &make_context(tracker, runner)).unwrap();
+    implement(42, &ctx).unwrap();
 
     assert!(claimed.borrow().contains(&42));
 }
@@ -199,8 +214,9 @@ fn implement_fn_claims_issue_before_running_agent() {
 fn implement_fn_runs_agent_with_issue_content_in_prompt() {
     let (tracker, _, _, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, prompt) = FakeRunner::succeeds();
+    let (ctx, _dir) = make_context(tracker, runner);
 
-    implement(42, &make_context(tracker, runner)).unwrap();
+    implement(42, &ctx).unwrap();
 
     let prompt = prompt.borrow();
     let prompt = prompt.as_ref().unwrap();
@@ -212,8 +228,9 @@ fn implement_fn_runs_agent_with_issue_content_in_prompt() {
 fn implement_fn_marks_complete_when_agent_succeeds() {
     let (tracker, _, completed, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let (runner, _) = FakeRunner::succeeds();
+    let (ctx, _dir) = make_context(tracker, runner);
 
-    implement(42, &make_context(tracker, runner)).unwrap();
+    implement(42, &ctx).unwrap();
 
     assert!(completed.borrow().contains(&42));
 }
@@ -222,8 +239,9 @@ fn implement_fn_marks_complete_when_agent_succeeds() {
 fn implement_fn_skips_hitl_issues_without_running_agent() {
     let (tracker, claimed, _, _, _) = FakeIssueTracker::new(make_issue(42, vec!["hitl"]));
     let (runner, prompt) = FakeRunner::succeeds();
+    let (ctx, _dir) = make_context(tracker, runner);
 
-    implement(42, &make_context(tracker, runner)).unwrap();
+    implement(42, &ctx).unwrap();
 
     assert!(claimed.borrow().is_empty());
     assert!(prompt.borrow().is_none());
@@ -233,8 +251,9 @@ fn implement_fn_skips_hitl_issues_without_running_agent() {
 fn implement_fn_does_not_mark_complete_when_agent_fails() {
     let (tracker, _, completed, _, _) = FakeIssueTracker::new(make_issue(42, vec![]));
     let runner = FakeRunner::fails();
+    let (ctx, _dir) = make_context(tracker, runner);
 
-    implement(42, &make_context(tracker, runner)).unwrap();
+    implement(42, &ctx).unwrap();
 
     assert!(completed.borrow().is_empty());
 }
@@ -285,7 +304,7 @@ fn complete_ticket_runs_implement_review_and_instructions_when_clean() {
         agent_success("CLEAN"),   // review
         agent_success(""),        // generate_test_instructions
     ]);
-    let ctx = make_context_sequenced(tracker, runner, 10);
+    let (ctx, _dir) = make_context_sequenced(tracker, runner, 10);
 
     complete_ticket(42, &ctx).unwrap();
 
@@ -302,7 +321,7 @@ fn complete_ticket_loops_when_review_has_findings() {
         agent_success("<reviewResult>CLEAN</reviewResult>"),     // review — clean
         agent_success(""),          // generate_test_instructions
     ]);
-    let ctx = make_context_sequenced(tracker, runner, 10);
+    let (ctx, _dir) = make_context_sequenced(tracker, runner, 10);
 
     complete_ticket(42, &ctx).unwrap();
 
@@ -316,7 +335,7 @@ fn complete_ticket_marks_hitl_when_budget_exhausted() {
         agent_success(""),  // implement uses the only iteration
         // review will hit budget
     ]);
-    let ctx = make_context_sequenced(tracker, runner, 1);
+    let (ctx, _dir) = make_context_sequenced(tracker, runner, 1);
 
     complete_ticket(42, &ctx).unwrap();
 
@@ -340,7 +359,7 @@ fn complete_series_executes_tickets_in_plan_order_sequence() {
         agent_success("<reviewResult>CLEAN</reviewResult>"),         // review issue 1
         agent_success(""),                                           // instructions issue 1
     ]);
-    let ctx = make_context_sequenced(tracker, runner, 20);
+    let (ctx, _dir) = make_context_sequenced(tracker, runner, 20);
 
     complete_series("my-label", &ctx).unwrap();
 
@@ -366,7 +385,7 @@ fn complete_feature_executes_children_reviews_and_generates_instructions_when_cl
         agent_success("<featureReviewResult>CLEAN</featureReviewResult>"),       // feature_review
         agent_success(""),                                                        // feature instructions
     ]);
-    let ctx = make_context_sequenced(tracker, runner, 20);
+    let (ctx, _dir) = make_context_sequenced(tracker, runner, 20);
 
     complete_feature(99, &ctx).unwrap();
 
@@ -398,7 +417,7 @@ fn complete_feature_executes_new_children_after_in_scope_findings() {
         agent_success("<featureReviewResult>CLEAN</featureReviewResult>"),       // second feature_review
         agent_success(""),                                                        // feature instructions
     ]);
-    let ctx = make_context_sequenced(tracker, runner, 30);
+    let (ctx, _dir) = make_context_sequenced(tracker, runner, 30);
 
     complete_feature(99, &ctx).unwrap();
 
@@ -430,7 +449,7 @@ fn complete_feature_marks_hitl_when_second_feature_review_still_has_findings() {
         agent_success(""),                                                        // instructions 11
         agent_success("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>"), // feature_review 2 — still findings
     ]);
-    let ctx = make_context_sequenced(tracker, runner, 30);
+    let (ctx, _dir) = make_context_sequenced(tracker, runner, 30);
 
     complete_feature(99, &ctx).unwrap();
 

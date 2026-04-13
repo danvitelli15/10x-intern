@@ -1,5 +1,7 @@
+<strip-before-prompting>
 # Available variables
 # {{issues_list}} — formatted list of all issues to be ordered
+</strip-before-prompting>
 
 You are planning the execution order for a set of work items.
 

@@ -1,3 +1,11 @@
+<strip-before-prompting>
+# Available variables
+# {{issue_id}}     — the GitHub issue number
+# {{issue_title}}  — the issue title
+# {{issue_body}}   — the full issue body / acceptance criteria
+# {{repo_context}} — contents of your context_file (e.g. CLAUDE.md)
+</strip-before-prompting>
+
 {{repo_context}}
 
 ## Task: Implement Issue #{{issue_id}}

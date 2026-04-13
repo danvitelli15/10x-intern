@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use anyhow::Result;
 
-use crate::actions::{feature_review, generate_test_instructions, implement, plan_order, review};
+use crate::actions::{create_file, feature_review, generate_test_instructions, implement, plan_order, review};
 use crate::cli::{Command, CommitStrategyArg};
 use crate::config::Config;
 use crate::git::GitClient;
@@ -14,6 +14,25 @@ use crate::traits::{
     AgentOutput, AgentRunner, CommitStrategy, EventSink, IssueTracker, IssueType, RemoteClient,
     RunConfig, SourceControl,
 };
+
+const DEFAULT_CONFIG: &str = include_str!("../scaffold/config.toml");
+const PROMPT_IMPLEMENT: &str = include_str!("../scaffold/prompts/implement.md");
+const PROMPT_REVIEW: &str = include_str!("../scaffold/prompts/review.md");
+const PROMPT_FEATURE_REVIEW: &str = include_str!("../scaffold/prompts/feature_review.md");
+const PROMPT_PLAN_ORDER: &str = include_str!("../scaffold/prompts/plan_order.md");
+const PROMPT_TEST_INSTRUCTIONS: &str = include_str!("../scaffold/prompts/test_instructions.md");
+
+pub fn init(base_dir: &std::path::Path) -> Result<()> {
+    let intern_dir = base_dir.join(".intern");
+    let prompts_dir = intern_dir.join("prompts");
+    create_file(&intern_dir.join("config.toml"), DEFAULT_CONFIG)?;
+    create_file(&prompts_dir.join("implement.md"), PROMPT_IMPLEMENT)?;
+    create_file(&prompts_dir.join("review.md"), PROMPT_REVIEW)?;
+    create_file(&prompts_dir.join("feature_review.md"), PROMPT_FEATURE_REVIEW)?;
+    create_file(&prompts_dir.join("plan_order.md"), PROMPT_PLAN_ORDER)?;
+    create_file(&prompts_dir.join("test_instructions.md"), PROMPT_TEST_INSTRUCTIONS)?;
+    Ok(())
+}
 
 pub fn complete_series(label: &str, ctx: &Context) -> Result<()> {
     let issues = ctx.issues.get_issues_by_label(label)?;
@@ -108,11 +127,15 @@ impl Context {
 }
 
 pub fn run(command: Command, config: Config) -> Result<()> {
+    if let Command::Init = command {
+        return init(&config.resolve_work_directory());
+    }
     let ctx = build_context(&command, &config)?;
     match command {
         Command::Implement { issue_id, .. } => complete_ticket(issue_id, &ctx),
         Command::Clear { label, .. } => complete_series(&label, &ctx),
         Command::Review { .. } => todo!("review"),
+        Command::Init => unreachable!(),
     }
 }
 
@@ -178,6 +201,7 @@ fn build_run_config(command: &Command, config: &Config) -> Result<RunConfig> {
             (*dry_run, *max_iterations, commit_strategy.clone())
         }
         Command::Review { dry_run, .. } => (*dry_run, None, None),
+        Command::Init => unreachable!(),
     };
 
     let commit_strategy = match commit_strategy_override {
@@ -277,5 +301,19 @@ mod tests {
         ctx.run_agent("p2").unwrap();
         let result = ctx.run_agent("p3");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn init_creates_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path()).unwrap();
+        assert!(dir.path().join(".intern/config.toml").exists());
+    }
+
+    #[test]
+    fn init_errors_if_already_initialized() {
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path()).unwrap();
+        assert!(init(dir.path()).is_err());
     }
 }
