@@ -21,6 +21,7 @@ impl LocalRunner {
 impl AgentRunner for LocalRunner {
     fn run(&self, prompt: &str, config: &RunConfig) -> Result<AgentOutput> {
         if config.dry_run {
+            log::info!("dry run — skipping agent invocation");
             return Ok(AgentOutput {
                 stdout: String::new(),
                 success: true,
@@ -30,6 +31,7 @@ impl AgentRunner for LocalRunner {
         let mut args = vec!["--print", "--dangerously-skip-permissions"];
 
         if let Some(ref settings) = self.settings_file {
+            log::trace!("runner: using settings file '{settings}'");
             args.push("--settings");
             args.push(settings.as_str());
         }
@@ -37,15 +39,17 @@ impl AgentRunner for LocalRunner {
         args.push("-p");
         args.push(prompt);
 
+        log::debug!("runner: invoking claude ({} char prompt)", prompt.len());
+
         match self.runner.run("claude", &args) {
-            Ok(stdout) => Ok(AgentOutput {
-                stdout,
-                success: true,
-            }),
-            Err(_) => Ok(AgentOutput {
-                stdout: String::new(),
-                success: false,
-            }),
+            Ok(stdout) => {
+                log::debug!("runner: claude succeeded ({} chars of output)", stdout.len());
+                Ok(AgentOutput { stdout, success: true })
+            }
+            Err(e) => {
+                log::info!("runner: claude invocation failed: {e}");
+                Ok(AgentOutput { stdout: String::new(), success: false })
+            }
         }
     }
 }

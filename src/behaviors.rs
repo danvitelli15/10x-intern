@@ -28,14 +28,19 @@ impl WizardHints {
 const KNOWN_CONTEXT_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
 
 pub fn detect_wizard_hints(base_dir: &std::path::Path, runner: &dyn CommandRunner) -> WizardHints {
+    log::debug!("detect_wizard_hints: scanning {}", base_dir.display());
     let repo = detect_repo_slug(runner);
+    log::trace!("detect_wizard_hints: repo slug — {:?}", repo);
     let context_file = KNOWN_CONTEXT_FILES
         .iter()
         .find(|&&name| find_file(base_dir, name).is_some())
         .map(|&name| name.to_string());
+    log::trace!("detect_wizard_hints: context file — {:?}", context_file);
     let source_control_kind = if find_file(base_dir, ".git").is_some() {
+        log::trace!("detect_wizard_hints: .git directory found");
         Some(SourceControlKind::Git)
     } else {
+        log::trace!("detect_wizard_hints: no .git directory found");
         None
     };
     WizardHints {
@@ -239,12 +244,15 @@ const PROMPT_PLAN_ORDER: &str = include_str!("../scaffold/prompts/plan_order.md"
 const PROMPT_TEST_INSTRUCTIONS: &str = include_str!("../scaffold/prompts/test_instructions.md");
 
 pub fn scaffold_intern_directory(base_dir: &std::path::Path, wizard: &WizardOutput) -> Result<()> {
+    log::info!("scaffolding .intern directory in {}", base_dir.display());
     let intern_dir = base_dir.join(".intern");
     let prompts_dir = intern_dir.join("prompts");
+    log::debug!("scaffold: writing config.toml");
     create_file(
         &intern_dir.join("config.toml"),
         &generate_config_toml(wizard),
     )?;
+    log::debug!("scaffold: writing prompt templates");
     create_file(&prompts_dir.join("implement.md"), PROMPT_IMPLEMENT)?;
     create_file(&prompts_dir.join("review.md"), PROMPT_REVIEW)?;
     create_file(
@@ -256,6 +264,7 @@ pub fn scaffold_intern_directory(base_dir: &std::path::Path, wizard: &WizardOutp
         &prompts_dir.join("test_instructions.md"),
         PROMPT_TEST_INSTRUCTIONS,
     )?;
+    log::info!("scaffold complete — run 'intern implement <issue-id>' to start");
     Ok(())
 }
 
@@ -295,57 +304,78 @@ fn generate_config_toml(wizard: &WizardOutput) -> String {
 }
 
 pub fn complete_ticket(issue_id: u64, ctx: &Context) -> Result<()> {
+    log::debug!("complete_ticket: starting implement+review loop for issue #{issue_id}");
     loop {
+        log::trace!("complete_ticket: beginning iteration for issue #{issue_id}");
         let result = (|| -> Result<bool> {
             implement(issue_id, ctx)?;
             review(issue_id, ctx)
         })();
 
         match result {
-            Ok(false) => break,
-            Ok(true) => continue,
+            Ok(false) => {
+                log::debug!("complete_ticket: review clean for issue #{issue_id}");
+                break;
+            }
+            Ok(true) => {
+                log::info!("review found issues with #{issue_id} — retrying");
+                continue;
+            }
             Err(e) if e.downcast_ref::<BudgetExhausted>().is_some() => {
+                log::info!("budget exhausted for issue #{issue_id} — skipping (hitl)");
                 ctx.issues.skip_issue(issue_id)?;
                 return Ok(());
             }
             Err(e) => return Err(e),
         }
     }
+    log::debug!("complete_ticket: generating test instructions for issue #{issue_id}");
     generate_test_instructions(issue_id, ctx)?;
     Ok(())
 }
 
 pub fn complete_feature(issue_id: u64, ctx: &Context) -> Result<()> {
+    log::debug!("complete_feature: starting for issue #{issue_id}");
     let initial_children = ctx.issues.get_children(issue_id)?;
+    log::debug!("complete_feature: {} initial child issue(s) for #{issue_id}", initial_children.len());
     let initial_ids: std::collections::HashSet<u64> =
         initial_children.iter().map(|i| i.id).collect();
     execute_ordered(&initial_children, ctx)?;
 
+    log::debug!("complete_feature: running feature review for #{issue_id}");
     let has_findings = feature_review(issue_id, ctx)?;
     if has_findings {
+        log::info!("feature review found issues for #{issue_id} — checking for new child issues");
         let all_children = ctx.issues.get_children(issue_id)?;
         let new_children: Vec<_> = all_children
             .into_iter()
             .filter(|i| !initial_ids.contains(&i.id))
             .collect();
+        log::debug!("complete_feature: {} new child issue(s) to process", new_children.len());
         execute_ordered(&new_children, ctx)?;
 
         if feature_review(issue_id, ctx)? {
+            log::info!("second feature review still has findings for #{issue_id} — skipping (hitl)");
             ctx.issues.skip_issue(issue_id)?;
             return Ok(());
         }
     }
 
+    log::debug!("complete_feature: generating test instructions for #{issue_id}");
     generate_test_instructions(issue_id, ctx)?;
     Ok(())
 }
 
 pub fn execute_ordered(issues: &[crate::traits::Issue], ctx: &Context) -> Result<()> {
+    log::info!("planning execution order for {} issue(s)", issues.len());
     let ordered_ids = plan_order(issues, ctx)?;
-    for id in ordered_ids {
-        match ctx.issues.issue_type(id)? {
-            IssueType::Ticket => complete_ticket(id, ctx)?,
-            IssueType::Feature => complete_feature(id, ctx)?,
+    log::debug!("execute_ordered: order — {:?}", ordered_ids);
+    for id in &ordered_ids {
+        let issue_type = ctx.issues.issue_type(*id)?;
+        log::trace!("execute_ordered: issue #{id} is {}", match issue_type { IssueType::Ticket => "Ticket", IssueType::Feature => "Feature" });
+        match issue_type {
+            IssueType::Ticket => complete_ticket(*id, ctx)?,
+            IssueType::Feature => complete_feature(*id, ctx)?,
         }
     }
     Ok(())

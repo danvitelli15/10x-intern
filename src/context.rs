@@ -47,7 +47,9 @@ impl Context {
 
     pub fn run_agent(&self, prompt: &str) -> Result<AgentOutput> {
         let used = self.iterations_used.get();
+        log::trace!("run_agent: iteration {}/{}", used + 1, self.config.max_iterations);
         if used >= self.config.max_iterations {
+            log::debug!("run_agent: budget exhausted after {used} iteration(s)");
             return Err(anyhow::anyhow!(BudgetExhausted));
         }
         self.iterations_used.set(used + 1);

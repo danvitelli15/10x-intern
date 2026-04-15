@@ -23,11 +23,14 @@ pub fn init_workflow_with_defaults(base_dir: &std::path::Path) -> Result<()> {
 }
 
 pub fn implement_workflow(issue_id: u64, ctx: &Context) -> Result<()> {
+    log::info!("starting implement for issue #{issue_id}");
     complete_ticket(issue_id, ctx)
 }
 
 pub fn clear_workflow(label: &str, ctx: &Context) -> Result<()> {
+    log::info!("fetching issues with label '{label}'");
     let issues = ctx.issues.get_issues_by_label(label)?;
+    log::info!("found {} issue(s) to process", issues.len());
     execute_ordered(&issues, ctx)
 }
 

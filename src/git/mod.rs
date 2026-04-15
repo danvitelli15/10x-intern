@@ -14,25 +14,36 @@ impl GitClient {
 
 impl SourceControl for GitClient {
     fn create_branch(&self, name: &str) -> Result<()> {
+        log::info!("git: creating branch '{name}'");
         self.runner.run("git", &["switch", "-c", name])?;
         Ok(())
     }
 
     fn current_branch(&self) -> Result<String> {
+        log::trace!("git: getting current branch");
         let output = self
             .runner
             .run("git", &["rev-parse", "--abbrev-ref", "HEAD"])?;
-        Ok(output.trim().to_string())
+        let branch = output.trim().to_string();
+        log::trace!("git: current branch is '{branch}'");
+        Ok(branch)
     }
 
     fn diff_from_base(&self, base: &str) -> Result<String> {
-        self.runner.run("git", &["diff", &format!("{}...HEAD", base)])
+        log::trace!("git: computing diff from '{base}'");
+        let diff = self.runner.run("git", &["diff", &format!("{}...HEAD", base)])?;
+        log::trace!("git: diff is {} bytes", diff.len());
+        Ok(diff)
     }
 
     fn stage(&self, paths: Option<&[&str]>) -> Result<()> {
         match paths {
-            None => self.runner.run("git", &["add", "-A"])?,
+            None => {
+                log::debug!("git: staging all changes");
+                self.runner.run("git", &["add", "-A"])?
+            }
             Some(paths) => {
+                log::debug!("git: staging {} path(s)", paths.len());
                 let mut args = vec!["add"];
                 args.extend_from_slice(paths);
                 self.runner.run("git", &args)?
@@ -42,6 +53,7 @@ impl SourceControl for GitClient {
     }
 
     fn commit(&self, message: &str) -> Result<()> {
+        log::info!("git: committing — {message}");
         self.runner.run("git", &["commit", "-m", message])?;
         Ok(())
     }

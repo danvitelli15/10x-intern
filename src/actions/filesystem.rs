@@ -5,7 +5,9 @@ use anyhow::Result;
 use crate::traits::CommandRunner;
 
 pub fn detect_repo_slug(runner: &dyn CommandRunner) -> Option<String> {
+    log::trace!("detect_repo_slug: checking if gh is available");
     runner.run("gh", &["--version"]).ok()?;
+    log::trace!("detect_repo_slug: fetching repo slug via gh");
     let output = runner
         .run(
             "gh",
@@ -19,7 +21,9 @@ pub fn detect_repo_slug(runner: &dyn CommandRunner) -> Option<String> {
             ],
         )
         .ok()?;
-    Some(output.trim().to_string())
+    let slug = output.trim().to_string();
+    log::debug!("detect_repo_slug: detected '{slug}'");
+    Some(slug)
 }
 
 pub fn find_file(base_dir: &Path, name: &str) -> Option<std::path::PathBuf> {
@@ -28,6 +32,7 @@ pub fn find_file(base_dir: &Path, name: &str) -> Option<std::path::PathBuf> {
 }
 
 pub fn create_file(path: &Path, content: &str) -> Result<()> {
+    log::trace!("create_file: {}", path.display());
     if path.exists() {
         anyhow::bail!("file already exists: {}", path.display());
     }

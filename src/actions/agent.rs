@@ -7,10 +7,13 @@ use crate::context::Context;
 use crate::traits::Issue;
 
 pub fn plan_order(issues: &[Issue], ctx: &Context) -> Result<Vec<u64>> {
+    log::debug!("plan_order: planning {} issue(s)", issues.len());
     let prompt = build_plan_order_prompt(issues, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
     let items: Vec<OrderedItem> = serde_json::from_str(output.stdout.trim())?;
-    Ok(items.into_iter().map(|item| item.id).collect())
+    let ids: Vec<u64> = items.into_iter().map(|item| item.id).collect();
+    log::debug!("plan_order: execution order — {:?}", ids);
+    Ok(ids)
 }
 
 #[cfg(test)]
@@ -38,22 +41,31 @@ mod plan_order_tests {
 }
 
 pub fn implement(issue_id: u64, ctx: &Context) -> Result<()> {
+    log::debug!("implement: fetching issue #{issue_id}");
     let issue = ctx.issues.get_issue(issue_id)?;
+    log::trace!("implement: issue #{issue_id} labels — {:?}", issue.labels);
 
     if issue.labels.contains(&"hitl".to_string()) {
         log::info!("skipping issue #{issue_id} — labeled hitl");
         return Ok(());
     }
 
+    log::info!("claiming issue #{issue_id}");
     ctx.issues.claim_issue(issue_id)?;
     ctx.events.emit(crate::traits::Event::AgentStarted(issue_id));
 
+    log::debug!("implement: building prompt for issue #{issue_id}");
     let prompt = build_implement_prompt(&issue, &ctx.config.repo_context, &ctx.config.work_directory)?;
+    log::debug!("implement: running agent for issue #{issue_id}");
     let output = ctx.run_agent(&prompt)?;
+    log::trace!("implement: agent returned success={} for issue #{issue_id}", output.success);
 
     if output.success {
+        log::info!("issue #{issue_id} implemented successfully");
         ctx.issues.complete_issue(issue_id)?;
         ctx.events.emit(crate::traits::Event::IssueComplete(issue_id));
+    } else {
+        log::info!("agent did not succeed for issue #{issue_id}");
     }
 
     ctx.events.emit(crate::traits::Event::RunComplete);
@@ -61,11 +73,15 @@ pub fn implement(issue_id: u64, ctx: &Context) -> Result<()> {
 }
 
 pub fn review(issue_id: u64, ctx: &Context) -> Result<bool> {
+    log::debug!("review: running for issue #{issue_id}");
     let issue = ctx.issues.get_issue(issue_id)?;
     let diff = ctx.source_control.diff_from_base("main")?;
+    log::trace!("review: diff is {} bytes", diff.len());
     let prompt = build_review_prompt(&issue, &diff, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
-    Ok(output.stdout.contains("<reviewResult>FINDINGS</reviewResult>"))
+    let has_findings = output.stdout.contains("<reviewResult>FINDINGS</reviewResult>");
+    log::debug!("review: issue #{issue_id} — {}", if has_findings { "FINDINGS" } else { "CLEAN" });
+    Ok(has_findings)
 }
 
 #[cfg(test)]
@@ -93,11 +109,15 @@ mod review_tests {
 }
 
 pub fn feature_review(issue_id: u64, ctx: &Context) -> Result<bool> {
+    log::debug!("feature_review: running for issue #{issue_id}");
     let issue = ctx.issues.get_issue(issue_id)?;
     let diff = ctx.source_control.diff_from_base("main")?;
+    log::trace!("feature_review: diff is {} bytes", diff.len());
     let prompt = build_feature_review_prompt(&issue, &diff, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
-    Ok(output.stdout.contains("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>"))
+    let has_findings = output.stdout.contains("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>");
+    log::debug!("feature_review: issue #{issue_id} — {}", if has_findings { "IN_SCOPE_FINDINGS" } else { "CLEAN" });
+    Ok(has_findings)
 }
 
 #[cfg(test)]
@@ -125,10 +145,13 @@ mod feature_review_tests {
 }
 
 pub fn generate_test_instructions(issue_id: u64, ctx: &Context) -> Result<()> {
+    log::debug!("generate_test_instructions: running for issue #{issue_id}");
     let issue = ctx.issues.get_issue(issue_id)?;
     let diff = ctx.source_control.diff_from_base("main")?;
+    log::trace!("generate_test_instructions: diff is {} bytes", diff.len());
     let prompt = build_test_instructions_prompt(&issue, &diff, &ctx.config.work_directory)?;
     ctx.run_agent(&prompt)?;
+    log::debug!("generate_test_instructions: complete for issue #{issue_id}");
     Ok(())
 }
 
@@ -176,6 +199,7 @@ mod strip_prompt_docs_tests {
 
 fn load_prompt(base_dir: &Path, name: &str) -> Result<String> {
     let path = base_dir.join(".intern/prompts").join(format!("{name}.md"));
+    log::trace!("load_prompt: loading '{name}' from {}", path.display());
     if !path.exists() {
         anyhow::bail!(
             "missing prompt file: {} — run 'intern init' to scaffold defaults",
@@ -183,6 +207,7 @@ fn load_prompt(base_dir: &Path, name: &str) -> Result<String> {
         );
     }
     let raw = std::fs::read_to_string(&path)?;
+    log::trace!("load_prompt: '{name}' loaded ({} chars)", raw.len());
     Ok(strip_prompt_docs(&raw))
 }
 

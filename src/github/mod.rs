@@ -40,6 +40,7 @@ impl GithubAdapter {
 
 impl IssueTracker for GithubAdapter {
     fn get_issue(&self, id: u64) -> Result<Issue> {
+        log::trace!("gh: fetching issue #{id} from {}", self.repo);
         let output = self.runner.run(
             "gh",
             &[
@@ -53,17 +54,21 @@ impl IssueTracker for GithubAdapter {
             ],
         )?;
         let gh_issue: GhIssue = serde_json::from_str(&output)?;
+        log::trace!("gh: issue #{id} — '{}'", gh_issue.title);
         Ok(into_issue(gh_issue))
     }
 
     fn get_children(&self, id: u64) -> Result<Vec<Issue>> {
+        log::trace!("gh: fetching sub-issues for #{id}");
         let path = format!("/repos/{}/issues/{}/sub_issues", self.repo, id);
         let output = self.runner.run("gh", &["api", &path])?;
         let gh_issues: Vec<GhIssue> = serde_json::from_str(&output)?;
+        log::debug!("gh: issue #{id} has {} sub-issue(s)", gh_issues.len());
         Ok(gh_issues.into_iter().map(into_issue).collect())
     }
 
     fn get_issues_by_label(&self, label: &str) -> Result<Vec<Issue>> {
+        log::debug!("gh: listing issues with label '{label}' in {}", self.repo);
         let output = self.runner.run(
             "gh",
             &[
@@ -78,10 +83,12 @@ impl IssueTracker for GithubAdapter {
             ],
         )?;
         let gh_issues: Vec<GhIssue> = serde_json::from_str(&output)?;
+        log::debug!("gh: found {} issue(s) with label '{label}'", gh_issues.len());
         Ok(gh_issues.into_iter().map(into_issue).collect())
     }
 
     fn claim_issue(&self, id: u64) -> Result<()> {
+        log::debug!("gh: posting claim comment on issue #{id}");
         self.runner.run(
             "gh",
             &[
@@ -98,6 +105,7 @@ impl IssueTracker for GithubAdapter {
     }
 
     fn complete_issue(&self, id: u64) -> Result<()> {
+        log::debug!("gh: labeling issue #{id} as agent-complete");
         self.runner.run(
             "gh",
             &[
@@ -114,6 +122,7 @@ impl IssueTracker for GithubAdapter {
     }
 
     fn skip_issue(&self, id: u64) -> Result<()> {
+        log::debug!("gh: labeling issue #{id} as hitl (skipping)");
         self.runner.run(
             "gh",
             &[
@@ -130,6 +139,7 @@ impl IssueTracker for GithubAdapter {
     }
 
     fn post_comment(&self, id: u64, body: &str) -> Result<()> {
+        log::debug!("gh: posting comment on issue #{id}");
         self.runner.run(
             "gh",
             &[
@@ -146,6 +156,7 @@ impl IssueTracker for GithubAdapter {
     }
 
     fn create_child_issue(&self, parent_id: u64, title: &str, body: &str) -> Result<Issue> {
+        log::info!("gh: creating child issue for #{parent_id}: '{title}'");
         let url = self.runner.run(
             "gh",
             &[
@@ -153,11 +164,13 @@ impl IssueTracker for GithubAdapter {
             ],
         )?;
         let child_id = parse_id_from_url(&url)?;
+        log::debug!("gh: child issue #{child_id} created, linking to parent #{parent_id}");
 
         let path = format!("/repos/{}/issues/{}/sub_issues", self.repo, parent_id);
         let link_field = format!("sub_issue_id={}", child_id);
         self.runner
             .run("gh", &["api", &path, "--method", "POST", "-f", &link_field])?;
+        log::debug!("gh: #{child_id} linked as sub-issue of #{parent_id}");
 
         Ok(Issue {
             id: child_id,
@@ -168,10 +181,13 @@ impl IssueTracker for GithubAdapter {
     }
 
     fn issue_type(&self, id: u64) -> Result<IssueType> {
+        log::trace!("gh: determining type of issue #{id}");
         let issue = self.get_issue(id)?;
         if issue.labels.iter().any(|l| l == "feature") {
+            log::trace!("gh: issue #{id} is a Feature");
             Ok(IssueType::Feature)
         } else {
+            log::trace!("gh: issue #{id} is a Ticket");
             Ok(IssueType::Ticket)
         }
     }
@@ -311,6 +327,7 @@ mod issue_tracker_tests {
 
 impl RemoteClient for GithubAdapter {
     fn create_pr(&self, title: &str, body: &str, branch: &str) -> Result<String> {
+        log::info!("gh: creating PR from '{branch}': {title}");
         let url = self.runner.run(
             "gh",
             &[
@@ -318,7 +335,9 @@ impl RemoteClient for GithubAdapter {
                 branch,
             ],
         )?;
-        Ok(url.trim().to_string())
+        let url = url.trim().to_string();
+        log::info!("gh: PR created — {url}");
+        Ok(url)
     }
 }
 
