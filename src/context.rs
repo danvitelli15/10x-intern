@@ -65,7 +65,7 @@ impl Context {
 mod tests {
     use super::*;
     use crate::test_utils::{StubEventSink, StubIssueTracker, StubRemoteClient, StubSourceControl};
-    use crate::traits::{AgentOutput, AgentRunner, CommitStrategy, RunConfig};
+    use crate::traits::{AgentOutput, AgentRunner, MergeStrategy, RunConfig};
 
     struct StubRunner;
     impl AgentRunner for StubRunner {
@@ -83,7 +83,8 @@ mod tests {
             Box::new(StubEventSink),
             RunConfig {
                 max_iterations,
-                commit_strategy: CommitStrategy::Direct,
+                merge_strategy: MergeStrategy::Direct,
+                base_branch: "main".to_string(),
                 dry_run: false,
                 repo_context: String::new(),
                 work_directory: std::path::PathBuf::from("."),

@@ -1,5 +1,5 @@
 use intern::cli::Command;
-use intern::config::{AgentConfig, Config, IssueTrackerConfig, RunDefaults};
+use intern::config::{AgentConfig, Config, IssueTrackerConfig, RunDefaults, SourceControlConfig};
 use intern::orchestrator::run;
 
 fn implement_command(issue_id: u64) -> Command {
@@ -7,7 +7,7 @@ fn implement_command(issue_id: u64) -> Command {
         issue_id,
         dry_run: false,
         max_iterations: None,
-        commit_strategy: None,
+        merge_strategy: None,
     }
 }
 
@@ -22,6 +22,7 @@ fn github_config() -> Config {
             settings_file: None,
         },
         run: RunDefaults::default(),
+        source_control: SourceControlConfig::default(),
         context_file: None,
         work_directory: None,
     }

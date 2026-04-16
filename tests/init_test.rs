@@ -1,5 +1,5 @@
 use intern::behaviors::{interactive_config_wizard, WizardHints, WizardOutput};
-use intern::traits::{CommitStrategy, IssueTrackerKind, SourceControlKind};
+use intern::traits::{IssueTrackerKind, MergeStrategy, SourceControlKind};
 use intern::workflows::{init_workflow, init_workflow_with_defaults};
 
 mod common;
@@ -74,7 +74,7 @@ fn wizard_context_file_is_none_when_user_says_no() {
 }
 
 #[test]
-fn wizard_captures_commit_strategy_selection() {
+fn wizard_captures_merge_strategy_selection() {
     let interactor = common::StubInteractor::new()
         .with_choice(0)             // issue tracker: github
         .with_text("owner/repo")
@@ -82,12 +82,12 @@ fn wizard_captures_commit_strategy_selection() {
         .with_choice(0)             // agent: local
         .with_confirm(false)        // settings file: no
         .with_confirm(false)        // context file: no
-        .with_choice(1)             // commit strategy: per-ticket (index 1)
+        .with_choice(1)             // merge strategy: per-ticket (index 1)
         .with_confirm(true);
 
     let dir = tempfile::tempdir().unwrap();
     let output = interactive_config_wizard(dir.path(), &interactor, &WizardHints::none()).unwrap();
-    assert_eq!(output.commit_strategy, CommitStrategy::PerTicket);
+    assert_eq!(output.merge_strategy, MergeStrategy::PerTicket);
 }
 
 #[test]
@@ -97,9 +97,9 @@ fn wizard_output_defaults_uses_github_issue_tracker() {
 }
 
 #[test]
-fn wizard_output_defaults_uses_feature_branch_commit_strategy() {
+fn wizard_output_defaults_uses_feature_branch_merge_strategy() {
     let output = WizardOutput::defaults();
-    assert_eq!(output.commit_strategy, CommitStrategy::FeatureBranch);
+    assert_eq!(output.merge_strategy, MergeStrategy::FeatureBranch);
 }
 
 #[test]
@@ -120,12 +120,29 @@ fn scaffold_writes_issue_tracker_values_to_config() {
 }
 
 #[test]
-fn scaffold_writes_commit_strategy_to_config() {
+fn scaffold_writes_merge_strategy_to_config() {
     let dir = tempfile::tempdir().unwrap();
-    let output = WizardOutput { commit_strategy: CommitStrategy::PerTicket, ..WizardOutput::defaults() };
+    let output = WizardOutput { merge_strategy: MergeStrategy::PerTicket, ..WizardOutput::defaults() };
     intern::behaviors::scaffold_intern_directory(dir.path(), &output).unwrap();
     let config = std::fs::read_to_string(dir.path().join(".intern/config.toml")).unwrap();
     assert!(config.contains("per-ticket"));
+}
+
+#[test]
+fn scaffold_writes_merge_strategy_and_base_branch_under_source_control_section() {
+    let dir = tempfile::tempdir().unwrap();
+    intern::behaviors::scaffold_intern_directory(dir.path(), &WizardOutput::defaults()).unwrap();
+    let raw = std::fs::read_to_string(dir.path().join(".intern/config.toml")).unwrap();
+    // [source_control] section must come before [run] and contain merge_strategy and base_branch
+    let sc_pos = raw.find("[source_control]").expect("[source_control] section missing");
+    let run_pos = raw.find("[run]").expect("[run] section missing");
+    assert!(sc_pos < run_pos, "[source_control] should appear before [run]");
+    let sc_section = &raw[sc_pos..run_pos];
+    assert!(sc_section.contains("merge_strategy"), "merge_strategy not in [source_control]");
+    assert!(sc_section.contains("base_branch"), "base_branch not in [source_control]");
+    // [run] section must NOT contain merge_strategy
+    let run_section = &raw[run_pos..];
+    assert!(!run_section.contains("merge_strategy"), "merge_strategy must not appear in [run]");
 }
 
 #[test]

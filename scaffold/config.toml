@@ -5,10 +5,17 @@
 kind = "github"
 repo = "owner/repo"                  # replace with your repo in owner/repo format
 
+[source_control]
+kind = "git"
+base_branch = "main"                 # branch new work is forked from
+merge_strategy = "feature-branch"   # direct | per-ticket | feature-branch
+use_worktree = false
+on_dirty_after_commit = "warn"       # fail | warn | commit
+on_dirty_no_commits = "fail"         # fail | warn | commit
+
 [agent]
 kind = "local"
 # settings_file = ".claude/settings.json"  # optional: path to Claude Code settings file
 
 [run]
 max_iterations = 100
-commit_strategy = "feature-branch"   # direct | per-ticket | feature-branch

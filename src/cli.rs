@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, ValueEnum)]
-pub enum CommitStrategyArg {
+pub enum MergeStrategyArg {
     Direct,
     FeatureBranch,
     PerTicket,
@@ -28,7 +28,7 @@ pub enum Command {
         max_iterations: Option<u32>,
         /// How to handle branches and commits
         #[arg(long, value_enum)]
-        commit_strategy: Option<CommitStrategyArg>,
+        merge_strategy: Option<MergeStrategyArg>,
     },
     /// Work through all issues matching a label
     Clear {
@@ -42,7 +42,7 @@ pub enum Command {
         max_iterations: Option<u32>,
         /// How to handle branches and commits
         #[arg(long, value_enum)]
-        commit_strategy: Option<CommitStrategyArg>,
+        merge_strategy: Option<MergeStrategyArg>,
     },
     /// Run the review phase against a completed issue
     Review {

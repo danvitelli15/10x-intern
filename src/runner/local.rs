@@ -58,14 +58,15 @@ impl AgentRunner for LocalRunner {
 mod tests {
     use super::*;
     use crate::test_utils::{fake_failing_runner, fake_runner};
-    use crate::traits::CommitStrategy;
+    use crate::traits::MergeStrategy;
     use std::cell::RefCell;
     use std::rc::Rc;
 
     fn run_config(dry_run: bool) -> RunConfig {
         RunConfig {
             max_iterations: 10,
-            commit_strategy: CommitStrategy::Direct,
+            merge_strategy: MergeStrategy::Direct,
+            base_branch: "main".to_string(),
             dry_run,
             repo_context: String::new(),
             work_directory: std::path::PathBuf::from("."),

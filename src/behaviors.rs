@@ -6,7 +6,7 @@ use crate::actions::{
 };
 use crate::context::{BudgetExhausted, Context};
 use crate::traits::{
-    AgentKind, CommandRunner, CommitStrategy, IssueTrackerKind, IssueType, SourceControlKind,
+    AgentKind, CommandRunner, IssueTrackerKind, IssueType, MergeStrategy, SourceControlKind,
 };
 
 pub struct WizardHints {
@@ -102,7 +102,7 @@ pub struct WizardOutput {
     pub agent_kind: AgentKind,
     pub settings_file: Option<String>,
     pub context_file: Option<String>,
-    pub commit_strategy: CommitStrategy,
+    pub merge_strategy: MergeStrategy,
 }
 
 impl WizardOutput {
@@ -114,7 +114,7 @@ impl WizardOutput {
             agent_kind: AgentKind::Local,
             settings_file: None,
             context_file: None,
-            commit_strategy: CommitStrategy::FeatureBranch,
+            merge_strategy: MergeStrategy::FeatureBranch,
         }
     }
 }
@@ -161,12 +161,12 @@ impl HasDescription for SourceControlKind {
     }
 }
 
-impl HasDescription for CommitStrategy {
+impl HasDescription for MergeStrategy {
     fn label(&self) -> &'static str {
-        CommitStrategy::label(self)
+        MergeStrategy::label(self)
     }
     fn description(&self) -> &'static str {
-        CommitStrategy::description(self)
+        MergeStrategy::description(self)
     }
 }
 
@@ -210,8 +210,8 @@ pub fn interactive_config_wizard(
         };
 
     let strategy_idx =
-        interactor.prompt_choice("Commit strategy", &choice_list(CommitStrategy::all()), None)?;
-    let commit_strategy = CommitStrategy::all()[strategy_idx];
+        interactor.prompt_choice("Merge strategy", &choice_list(MergeStrategy::all()), None)?;
+    let merge_strategy = MergeStrategy::all()[strategy_idx];
 
     let output = WizardOutput {
         issue_tracker_kind,
@@ -220,16 +220,16 @@ pub fn interactive_config_wizard(
         agent_kind,
         settings_file,
         context_file,
-        commit_strategy,
+        merge_strategy,
     };
 
     interactor.prompt_confirm(
         &format!(
-            "Settings look good?\n  issue_tracker: {} | repo: {} | agent: {} | commit_strategy: {}",
+            "Settings look good?\n  issue_tracker: {} | repo: {} | agent: {} | merge_strategy: {}",
             output.issue_tracker_kind.key(),
             output.repo,
             output.agent_kind.key(),
-            output.commit_strategy.key()
+            output.merge_strategy.key()
         ),
         true,
     )?;
@@ -283,6 +283,11 @@ fn generate_config_toml(wizard: &WizardOutput) -> String {
     lines.push(String::new());
     lines.push("[source_control]".to_string());
     lines.push(format!("kind = {:?}", wizard.source_control_kind.key()));
+    lines.push("base_branch = \"main\"".to_string());
+    lines.push(format!("merge_strategy = {:?}", wizard.merge_strategy.key()));
+    lines.push("use_worktree = false".to_string());
+    lines.push("on_dirty_after_commit = \"warn\"".to_string());
+    lines.push("on_dirty_no_commits = \"fail\"".to_string());
 
     lines.push(String::new());
     lines.push("[agent]".to_string());
@@ -294,10 +299,6 @@ fn generate_config_toml(wizard: &WizardOutput) -> String {
     lines.push(String::new());
     lines.push("[run]".to_string());
     lines.push("max_iterations = 100".to_string());
-    lines.push(format!(
-        "commit_strategy = {:?}",
-        wizard.commit_strategy.key()
-    ));
 
     lines.push(String::new());
     lines.join("\n")

@@ -11,6 +11,8 @@ pub struct Config {
     pub agent: AgentConfig,
     #[serde(default)]
     pub run: RunDefaults,
+    #[serde(default)]
+    pub source_control: SourceControlConfig,
     pub context_file: Option<String>,
     pub work_directory: Option<String>,
 }
@@ -32,17 +34,86 @@ pub struct AgentConfig {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SourceControlConfig {
+    pub kind: String,
+    pub base_branch: String,
+    pub merge_strategy: String,
+    pub use_worktree: bool,
+    pub on_dirty_after_commit: String,
+    pub on_dirty_no_commits: String,
+}
+
+impl Default for SourceControlConfig {
+    fn default() -> Self {
+        Self {
+            kind: "git".to_string(),
+            base_branch: "main".to_string(),
+            merge_strategy: "feature-branch".to_string(),
+            use_worktree: false,
+            on_dirty_after_commit: "warn".to_string(),
+            on_dirty_no_commits: "fail".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RunDefaults {
     pub max_iterations: u32,
-    pub commit_strategy: String,
 }
 
 impl Default for RunDefaults {
     fn default() -> Self {
         Self {
             max_iterations: 100,
-            commit_strategy: "feature-branch".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod source_control_config_tests {
+    use super::*;
+
+    #[test]
+    fn source_control_config_defaults_when_section_absent() {
+        let toml = r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "owner/repo"
+            [agent]
+            kind = "local"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.source_control.kind, "git");
+        assert_eq!(config.source_control.base_branch, "main");
+        assert_eq!(config.source_control.merge_strategy, "feature-branch");
+        assert!(!config.source_control.use_worktree);
+        assert_eq!(config.source_control.on_dirty_after_commit, "warn");
+        assert_eq!(config.source_control.on_dirty_no_commits, "fail");
+    }
+
+    #[test]
+    fn source_control_config_deserializes_explicit_section() {
+        let toml = r#"
+            [issue_tracker]
+            kind = "github"
+            repo = "owner/repo"
+            [agent]
+            kind = "local"
+            [source_control]
+            kind = "git"
+            base_branch = "trunk"
+            merge_strategy = "per-ticket"
+            use_worktree = true
+            on_dirty_after_commit = "fail"
+            on_dirty_no_commits = "warn"
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.source_control.kind, "git");
+        assert_eq!(config.source_control.base_branch, "trunk");
+        assert_eq!(config.source_control.merge_strategy, "per-ticket");
+        assert!(config.source_control.use_worktree);
+        assert_eq!(config.source_control.on_dirty_after_commit, "fail");
+        assert_eq!(config.source_control.on_dirty_no_commits, "warn");
     }
 }
 
@@ -129,6 +200,7 @@ mod resolve_work_directory_tests {
                 settings_file: None,
             },
             run: RunDefaults::default(),
+            source_control: SourceControlConfig::default(),
             context_file: None,
             work_directory: work_directory.map(Into::into),
         }
@@ -175,6 +247,7 @@ mod resolve_repo_context_tests {
                 settings_file: None,
             },
             run: RunDefaults::default(),
+            source_control: SourceControlConfig::default(),
             context_file: context_file.map(Into::into),
             work_directory: None,
         }

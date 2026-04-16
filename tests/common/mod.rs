@@ -8,8 +8,8 @@ use anyhow::Result;
 use intern::behaviors::UserInteractor;
 use intern::context::Context;
 use intern::traits::{
-    AgentOutput, AgentRunner, CommitStrategy, Event, EventSink, Issue, IssueTracker, IssueType,
-    RemoteClient, RunConfig, SourceControl,
+    AgentOutput, AgentRunner, Event, EventSink, Issue, IssueTracker, IssueType,
+    MergeStrategy, RemoteClient, RunConfig, SourceControl,
 };
 
 // --- Stub interactor ---
@@ -242,7 +242,8 @@ pub fn make_prompts_dir() -> tempfile::TempDir {
 pub fn run_config_with_dir(dir: &tempfile::TempDir) -> RunConfig {
     RunConfig {
         max_iterations: 10,
-        commit_strategy: CommitStrategy::Direct,
+        merge_strategy: MergeStrategy::Direct,
+        base_branch: "main".to_string(),
         dry_run: false,
         repo_context: String::new(),
         work_directory: dir.path().to_path_buf(),
@@ -270,7 +271,7 @@ pub fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner
         Box::new(FakeRemoteClient),
         Box::new(runner),
         Box::new(FakeEventSink),
-        RunConfig { max_iterations, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
+        RunConfig { max_iterations, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
     );
     (ctx, dir)
 }

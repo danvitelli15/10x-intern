@@ -75,7 +75,7 @@ pub fn implement(issue_id: u64, ctx: &Context) -> Result<()> {
 pub fn review(issue_id: u64, ctx: &Context) -> Result<bool> {
     log::debug!("review: running for issue #{issue_id}");
     let issue = ctx.issues.get_issue(issue_id)?;
-    let diff = ctx.source_control.diff_from_base("main")?;
+    let diff = ctx.source_control.diff_from_base(&ctx.config.base_branch)?;
     log::trace!("review: diff is {} bytes", diff.len());
     let prompt = build_review_prompt(&issue, &diff, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
@@ -111,7 +111,7 @@ mod review_tests {
 pub fn feature_review(issue_id: u64, ctx: &Context) -> Result<bool> {
     log::debug!("feature_review: running for issue #{issue_id}");
     let issue = ctx.issues.get_issue(issue_id)?;
-    let diff = ctx.source_control.diff_from_base("main")?;
+    let diff = ctx.source_control.diff_from_base(&ctx.config.base_branch)?;
     log::trace!("feature_review: diff is {} bytes", diff.len());
     let prompt = build_feature_review_prompt(&issue, &diff, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
@@ -147,7 +147,7 @@ mod feature_review_tests {
 pub fn generate_test_instructions(issue_id: u64, ctx: &Context) -> Result<()> {
     log::debug!("generate_test_instructions: running for issue #{issue_id}");
     let issue = ctx.issues.get_issue(issue_id)?;
-    let diff = ctx.source_control.diff_from_base("main")?;
+    let diff = ctx.source_control.diff_from_base(&ctx.config.base_branch)?;
     log::trace!("generate_test_instructions: diff is {} bytes", diff.len());
     let prompt = build_test_instructions_prompt(&issue, &diff, &ctx.config.work_directory)?;
     ctx.run_agent(&prompt)?;
@@ -362,7 +362,7 @@ fn build_test_instructions_prompt(issue: &Issue, diff: &str, work_directory: &Pa
 mod test_support {
     use crate::context::Context;
     use crate::test_utils::{StubEventSink, StubIssueTracker, StubRemoteClient, StubSourceControl};
-    use crate::traits::{AgentOutput, AgentRunner, CommitStrategy, RunConfig};
+    use crate::traits::{AgentOutput, AgentRunner, MergeStrategy, RunConfig};
 
     pub struct FixedRunner { pub stdout: String }
     impl AgentRunner for FixedRunner {
@@ -389,7 +389,7 @@ mod test_support {
             Box::new(StubRemoteClient),
             Box::new(FixedRunner { stdout: stdout.to_string() }),
             Box::new(StubEventSink),
-            RunConfig { max_iterations: 10, commit_strategy: CommitStrategy::Direct, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
+            RunConfig { max_iterations: 10, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
         );
         (ctx, dir)
     }

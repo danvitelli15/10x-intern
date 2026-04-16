@@ -54,13 +54,13 @@ impl std::fmt::Display for SourceControlKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommitStrategy {
+pub enum MergeStrategy {
     Direct,
     PerTicket,
     FeatureBranch,
 }
 
-impl CommitStrategy {
+impl MergeStrategy {
     pub fn key(&self) -> &'static str {
         match self {
             Self::Direct => "direct",
@@ -80,8 +80,8 @@ impl CommitStrategy {
     pub fn description(&self) -> &'static str {
         match self {
             Self::Direct => "Commit directly to the current branch",
-            Self::PerTicket => "Create a commit per ticket on the current branch",
-            Self::FeatureBranch => "Create a dedicated branch per feature",
+            Self::PerTicket => "Create a branch and PR per ticket",
+            Self::FeatureBranch => "All tickets share one branch and one PR",
         }
     }
 
@@ -94,7 +94,7 @@ impl CommitStrategy {
     }
 }
 
-impl std::fmt::Display for CommitStrategy {
+impl std::fmt::Display for MergeStrategy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} — {}", self.label(), self.description())
     }
@@ -181,7 +181,8 @@ impl std::fmt::Display for AgentKind {
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     pub max_iterations: u32,
-    pub commit_strategy: CommitStrategy,
+    pub merge_strategy: MergeStrategy,
+    pub base_branch: String,
     pub dry_run: bool,
     pub repo_context: String,
     pub work_directory: std::path::PathBuf,
