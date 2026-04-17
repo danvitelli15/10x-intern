@@ -255,6 +255,48 @@ mod load_prompt_tests {
     }
 
     #[test]
+    fn scaffold_implement_instructs_agent_to_commit_during_implementation() {
+        let raw = include_str!("../../scaffold/prompts/implement.md");
+        let dir = make_prompt_dir_with("implement", raw);
+        let stripped = load_prompt(dir.path(), "implement").unwrap();
+        // Must instruct the agent to commit as it works
+        assert!(
+            stripped.to_lowercase().contains("commit"),
+            "implement prompt should instruct agent to commit"
+        );
+        // Commits should be encouraged during implementation, not only at the very end
+        assert!(
+            stripped.to_lowercase().contains("as you") || stripped.to_lowercase().contains("each ") || stripped.to_lowercase().contains("incremental") || stripped.to_lowercase().contains("logical"),
+            "implement prompt should encourage committing during implementation, not just at the end"
+        );
+    }
+
+    #[test]
+    fn scaffold_implement_does_not_instruct_agent_to_create_branches() {
+        let raw = include_str!("../../scaffold/prompts/implement.md");
+        let dir = make_prompt_dir_with("implement", raw);
+        let stripped = load_prompt(dir.path(), "implement").unwrap();
+        assert!(
+            !stripped.to_lowercase().contains("create.*branch") && !stripped.contains("switch -c") && !stripped.contains("git branch"),
+            "implement prompt must not instruct the agent to create branches — that is the orchestrator's job"
+        );
+    }
+
+    #[test]
+    fn scaffold_implement_docs_note_vcs_override_responsibility() {
+        let raw = include_str!("../../scaffold/prompts/implement.md");
+        // The strip-before-prompting block is the docs section — check the raw content
+        assert!(
+            raw.contains("override") || raw.contains("custom"),
+            "implement prompt docs should mention that overriding the prompt means owning VCS commit instructions"
+        );
+        assert!(
+            raw.to_lowercase().contains("commit") && (raw.contains("override") || raw.contains("custom")),
+            "implement prompt docs should warn about commit responsibility when overriding"
+        );
+    }
+
+    #[test]
     fn scaffold_review_loads_and_strips_cleanly() {
         let dir = make_prompt_dir_with("review", include_str!("../../scaffold/prompts/review.md"));
         let result = load_prompt(dir.path(), "review").unwrap();
