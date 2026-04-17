@@ -178,12 +178,31 @@ impl std::fmt::Display for AgentKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirtyBehavior {
+    Fail,
+    Warn,
+    Commit,
+}
+
+impl DirtyBehavior {
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "fail" => Some(Self::Fail),
+            "warn" => Some(Self::Warn),
+            "commit" => Some(Self::Commit),
+            _ => None,
+        }
+    }
+}
+
 pub struct RunConfig {
     pub max_iterations: u32,
     pub merge_strategy: MergeStrategy,
     pub base_branch: String,
     pub use_worktree: bool,
+    pub on_dirty_after_commit: DirtyBehavior,
+    pub on_dirty_no_commits: DirtyBehavior,
     pub dry_run: bool,
     pub repo_context: String,
     pub work_directory: std::path::PathBuf,
@@ -229,6 +248,10 @@ pub trait SourceControl {
     fn create_branch(&self, name: &str, from: &str) -> Result<()>;
     fn current_branch(&self) -> Result<String>;
     fn diff_from_base(&self, base: &str) -> Result<String>;
+    /// Returns true if there are uncommitted changes in the working tree.
+    fn has_uncommitted_changes(&self) -> Result<bool>;
+    /// Returns true if there are commits on the current branch not present in `base`.
+    fn has_commits_since(&self, base: &str) -> Result<bool>;
     /// Stage files before committing.
     /// `None` stages everything (`git add -A`).
     /// `Some(paths)` stages only the specified paths.

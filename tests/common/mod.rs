@@ -8,7 +8,7 @@ use anyhow::Result;
 use intern::behaviors::UserInteractor;
 use intern::context::Context;
 use intern::traits::{
-    AgentOutput, AgentRunner, Event, EventSink, Issue, IssueTracker, IssueType,
+    AgentOutput, AgentRunner, DirtyBehavior, Event, EventSink, Issue, IssueTracker, IssueType,
     MergeStrategy, RemoteClient, RunConfig, SourceControl,
 };
 
@@ -130,25 +130,54 @@ impl SourceControl for FakeSourceControl {
     fn create_branch(&self, _name: &str, _from: &str) -> Result<()> { Ok(()) }
     fn current_branch(&self) -> Result<String> { Ok("main".to_string()) }
     fn diff_from_base(&self, _base: &str) -> Result<String> { Ok(String::new()) }
+    fn has_uncommitted_changes(&self) -> Result<bool> { Ok(false) }
+    fn has_commits_since(&self, _: &str) -> Result<bool> { Ok(true) }
     fn stage(&self, _paths: Option<&[&str]>) -> Result<()> { Ok(()) }
     fn commit(&self, _message: &str) -> Result<()> { Ok(()) }
 }
 
-/// Records create_branch calls as (name, from) pairs.
-/// Returns a configurable value from current_branch().
-/// Use recording_source_control() to get shared access to the recorded calls.
+/// Records create_branch, stage, and commit calls.
+/// Returns configurable values for current_branch, has_uncommitted_changes, has_commits_since.
+/// Use recording_source_control() for the default happy-path configuration.
 pub struct RecordingSourceControl {
     pub branches_created: Rc<RefCell<Vec<(String, String)>>>,
+    pub commits_made: Rc<RefCell<Vec<String>>>,
+    pub stages_made: Rc<RefCell<Vec<Option<Vec<String>>>>>,
     pub current_branch_result: String,
+    pub uncommitted_changes: bool,
+    pub has_commits: bool,
 }
 
 pub fn recording_source_control(current_branch: &str) -> (RecordingSourceControl, Rc<RefCell<Vec<(String, String)>>>) {
     let branches = Rc::new(RefCell::new(vec![]));
     let sc = RecordingSourceControl {
         branches_created: branches.clone(),
+        commits_made: Rc::new(RefCell::new(vec![])),
+        stages_made: Rc::new(RefCell::new(vec![])),
         current_branch_result: current_branch.to_string(),
+        uncommitted_changes: false,
+        has_commits: true,
     };
     (sc, branches)
+}
+
+/// Build a RecordingSourceControl with full control over all state.
+pub fn recording_source_control_full(
+    current_branch: &str,
+    uncommitted_changes: bool,
+    has_commits: bool,
+) -> (RecordingSourceControl, Rc<RefCell<Vec<String>>>, Rc<RefCell<Vec<Option<Vec<String>>>>>) {
+    let commits = Rc::new(RefCell::new(vec![]));
+    let stages = Rc::new(RefCell::new(vec![]));
+    let sc = RecordingSourceControl {
+        branches_created: Rc::new(RefCell::new(vec![])),
+        commits_made: commits.clone(),
+        stages_made: stages.clone(),
+        current_branch_result: current_branch.to_string(),
+        uncommitted_changes,
+        has_commits,
+    };
+    (sc, commits, stages)
 }
 
 impl SourceControl for RecordingSourceControl {
@@ -158,8 +187,16 @@ impl SourceControl for RecordingSourceControl {
     }
     fn current_branch(&self) -> Result<String> { Ok(self.current_branch_result.clone()) }
     fn diff_from_base(&self, _: &str) -> Result<String> { Ok(String::new()) }
-    fn stage(&self, _: Option<&[&str]>) -> Result<()> { Ok(()) }
-    fn commit(&self, _: &str) -> Result<()> { Ok(()) }
+    fn has_uncommitted_changes(&self) -> Result<bool> { Ok(self.uncommitted_changes) }
+    fn has_commits_since(&self, _: &str) -> Result<bool> { Ok(self.has_commits) }
+    fn stage(&self, paths: Option<&[&str]>) -> Result<()> {
+        self.stages_made.borrow_mut().push(paths.map(|p| p.iter().map(|s| s.to_string()).collect()));
+        Ok(())
+    }
+    fn commit(&self, message: &str) -> Result<()> {
+        self.commits_made.borrow_mut().push(message.to_string());
+        Ok(())
+    }
 }
 
 pub struct FakeRemoteClient;
@@ -273,6 +310,8 @@ pub fn run_config_with_dir(dir: &tempfile::TempDir) -> RunConfig {
         merge_strategy: MergeStrategy::Direct,
         base_branch: "main".to_string(),
         use_worktree: false,
+        on_dirty_after_commit: DirtyBehavior::Warn,
+        on_dirty_no_commits: DirtyBehavior::Fail,
         dry_run: false,
         repo_context: String::new(),
         work_directory: dir.path().to_path_buf(),
@@ -285,6 +324,8 @@ pub fn run_config_with_strategy(dir: &tempfile::TempDir, strategy: MergeStrategy
         merge_strategy: strategy,
         base_branch: base_branch.to_string(),
         use_worktree: false,
+        on_dirty_after_commit: DirtyBehavior::Warn,
+        on_dirty_no_commits: DirtyBehavior::Fail,
         dry_run: false,
         repo_context: String::new(),
         work_directory: dir.path().to_path_buf(),
@@ -312,7 +353,7 @@ pub fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner
         Box::new(FakeRemoteClient),
         Box::new(runner),
         Box::new(FakeEventSink),
-        RunConfig { max_iterations, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), use_worktree: false, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
+        RunConfig { max_iterations, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), use_worktree: false, on_dirty_after_commit: DirtyBehavior::Warn, on_dirty_no_commits: DirtyBehavior::Fail, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
     );
     (ctx, dir)
 }

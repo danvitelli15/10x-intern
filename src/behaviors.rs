@@ -6,7 +6,8 @@ use crate::actions::{
 };
 use crate::context::{BudgetExhausted, Context};
 use crate::traits::{
-    AgentKind, CommandRunner, IssueTrackerKind, IssueType, MergeStrategy, SourceControlKind,
+    AgentKind, CommandRunner, DirtyBehavior, IssueTrackerKind, IssueType, MergeStrategy,
+    SourceControlKind,
 };
 
 pub struct WizardHints {
@@ -304,6 +305,47 @@ fn generate_config_toml(wizard: &WizardOutput) -> String {
     lines.join("\n")
 }
 
+fn check_dirty_state(issue_id: u64, base_branch: &str, ctx: &Context) -> Result<()> {
+    let has_commits = ctx.source_control.has_commits_since(base_branch)?;
+    let is_dirty = ctx.source_control.has_uncommitted_changes()?;
+
+    if !has_commits {
+        // Agent made zero commits — apply on_dirty_no_commits regardless of tree state
+        log::warn!("complete_ticket: no commits made for issue #{issue_id}");
+        match ctx.config.on_dirty_no_commits {
+            DirtyBehavior::Fail => {
+                anyhow::bail!("no commits after implement for issue #{issue_id}: agent made no commits")
+            }
+            DirtyBehavior::Warn => {
+                log::warn!("issue #{issue_id}: agent made no commits — continuing");
+            }
+            DirtyBehavior::Commit => {
+                log::info!("issue #{issue_id}: staging and committing all changes");
+                ctx.source_control.stage(None)?;
+                ctx.source_control.commit(&format!("chore: capture all changes for issue #{issue_id}"))?;
+            }
+        }
+    } else if is_dirty {
+        // Agent committed but left uncommitted changes behind
+        log::debug!("complete_ticket: dirty tree after commit for issue #{issue_id}");
+        match ctx.config.on_dirty_after_commit {
+            DirtyBehavior::Fail => {
+                anyhow::bail!("dirty tree after implement for issue #{issue_id}: agent left uncommitted changes")
+            }
+            DirtyBehavior::Warn => {
+                log::warn!("issue #{issue_id}: agent left uncommitted changes — continuing");
+            }
+            DirtyBehavior::Commit => {
+                log::info!("issue #{issue_id}: staging and committing remaining changes");
+                ctx.source_control.stage(None)?;
+                ctx.source_control.commit(&format!("chore: capture uncommitted changes for issue #{issue_id}"))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn setup_workspace(issue_id: u64, base_branch: &str, ctx: &Context) -> Result<Option<String>> {
     // TODO: when use_worktree is true, provision a git worktree here
     match ctx.config.merge_strategy {
@@ -344,6 +386,8 @@ pub fn complete_ticket(issue_id: u64, ctx: &Context, base_branch: &str) -> Resul
             Err(e) => return Err(e),
         }
     }
+
+    check_dirty_state(issue_id, base_branch, ctx)?;
 
     if let Some(expected) = expected_branch {
         let actual = ctx.source_control.current_branch()?;

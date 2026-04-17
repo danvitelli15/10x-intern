@@ -9,7 +9,7 @@ use crate::github::GithubAdapter;
 use crate::process::ProcessRunner;
 use crate::reporter::log_reporter::LogReporter;
 use crate::runner::LocalRunner;
-use crate::traits::{MergeStrategy, RunConfig};
+use crate::traits::{DirtyBehavior, MergeStrategy, RunConfig};
 
 pub fn init_workflow(base_dir: &std::path::Path, interactor: &dyn UserInteractor) -> Result<()> {
     let runner = ProcessRunner;
@@ -86,11 +86,18 @@ pub fn build_run_config(command: &Command, config: &Config) -> Result<RunConfig>
             .unwrap_or(MergeStrategy::FeatureBranch),
     };
 
+    let on_dirty_after_commit = DirtyBehavior::from_key(&config.source_control.on_dirty_after_commit)
+        .unwrap_or(DirtyBehavior::Warn);
+    let on_dirty_no_commits = DirtyBehavior::from_key(&config.source_control.on_dirty_no_commits)
+        .unwrap_or(DirtyBehavior::Fail);
+
     Ok(RunConfig {
         max_iterations: max_iterations_override.unwrap_or(config.run.max_iterations),
         merge_strategy,
         base_branch: config.source_control.base_branch.clone(),
         use_worktree: config.source_control.use_worktree,
+        on_dirty_after_commit,
+        on_dirty_no_commits,
         dry_run,
         repo_context: config.resolve_repo_context()?,
         work_directory: config.resolve_work_directory(),

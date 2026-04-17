@@ -29,6 +29,16 @@ impl SourceControl for GitClient {
         Ok(branch)
     }
 
+    fn has_uncommitted_changes(&self) -> Result<bool> {
+        let output = self.runner.run("git", &["status", "--porcelain"])?;
+        Ok(!output.trim().is_empty())
+    }
+
+    fn has_commits_since(&self, base: &str) -> Result<bool> {
+        let output = self.runner.run("git", &["log", &format!("{base}..HEAD"), "--oneline"])?;
+        Ok(!output.trim().is_empty())
+    }
+
     fn diff_from_base(&self, base: &str) -> Result<String> {
         log::trace!("git: computing diff from '{base}'");
         let diff = self.runner.run("git", &["diff", &format!("{}...HEAD", base)])?;

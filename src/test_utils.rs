@@ -68,6 +68,8 @@ impl SourceControl for StubSourceControl {
     fn create_branch(&self, _: &str, _: &str) -> Result<()> { Ok(()) }
     fn current_branch(&self) -> Result<String> { Ok("main".into()) }
     fn diff_from_base(&self, _: &str) -> Result<String> { Ok("".into()) }
+    fn has_uncommitted_changes(&self) -> Result<bool> { Ok(false) }
+    fn has_commits_since(&self, _: &str) -> Result<bool> { Ok(true) }
     fn stage(&self, _: Option<&[&str]>) -> Result<()> { Ok(()) }
     fn commit(&self, _: &str) -> Result<()> { Ok(()) }
 }
