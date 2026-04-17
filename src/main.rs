@@ -19,6 +19,5 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     let config = Config::load()?;
-
     orchestrator::run(cli.command, config)
 }

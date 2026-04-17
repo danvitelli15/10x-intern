@@ -8,8 +8,12 @@ pub enum MergeStrategyArg {
 }
 
 #[derive(Parser)]
-#[command(name = "intern", about = "Autonomous ticket executor")]
+#[command(name = "intern", about = "Autonomous ticket executor", version, disable_version_flag = true)]
 pub struct Cli {
+    /// Print version information
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    pub version: (),
+
     #[command(subcommand)]
     pub command: Command,
 }
