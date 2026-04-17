@@ -13,9 +13,9 @@ impl GitClient {
 }
 
 impl SourceControl for GitClient {
-    fn create_branch(&self, name: &str) -> Result<()> {
-        log::info!("git: creating branch '{name}'");
-        self.runner.run("git", &["switch", "-c", name])?;
+    fn create_branch(&self, name: &str, from: &str) -> Result<()> {
+        log::info!("git: creating branch '{name}' from '{from}'");
+        self.runner.run("git", &["switch", "-c", name, from])?;
         Ok(())
     }
 
@@ -75,13 +75,10 @@ mod tests {
     fn create_branch_runs_git_switch() {
         let (client, calls) = adapter("");
 
-        client.create_branch("feature/123").unwrap();
+        client.create_branch("feature/123", "main").unwrap();
 
         let calls = calls.borrow();
-        assert_eq!(calls[0][0], "git");
-        assert_eq!(calls[0][1], "switch");
-        assert_eq!(calls[0][2], "-c");
-        assert_eq!(calls[0][3], "feature/123");
+        assert_eq!(calls[0][..], ["git", "switch", "-c", "feature/123", "main"]);
     }
 
     #[test]

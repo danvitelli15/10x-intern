@@ -304,8 +304,22 @@ fn generate_config_toml(wizard: &WizardOutput) -> String {
     lines.join("\n")
 }
 
-pub fn complete_ticket(issue_id: u64, ctx: &Context) -> Result<()> {
+fn setup_workspace(issue_id: u64, base_branch: &str, ctx: &Context) -> Result<Option<String>> {
+    // TODO: when use_worktree is true, provision a git worktree here
+    match ctx.config.merge_strategy {
+        MergeStrategy::Direct => Ok(None),
+        MergeStrategy::PerTicket | MergeStrategy::FeatureBranch => {
+            let branch = format!("feature/ticket-{issue_id}");
+            ctx.source_control.create_branch(&branch, base_branch)?;
+            Ok(Some(branch))
+        }
+    }
+}
+
+pub fn complete_ticket(issue_id: u64, ctx: &Context, base_branch: &str) -> Result<()> {
     log::debug!("complete_ticket: starting implement+review loop for issue #{issue_id}");
+    let expected_branch = setup_workspace(issue_id, base_branch, ctx)?;
+
     loop {
         log::trace!("complete_ticket: beginning iteration for issue #{issue_id}");
         let result = (|| -> Result<bool> {
@@ -330,18 +344,41 @@ pub fn complete_ticket(issue_id: u64, ctx: &Context) -> Result<()> {
             Err(e) => return Err(e),
         }
     }
+
+    if let Some(expected) = expected_branch {
+        let actual = ctx.source_control.current_branch()?;
+        if actual != expected {
+            anyhow::bail!(
+                "branch mismatch after implement: expected '{expected}', got '{actual}'"
+            );
+        }
+    }
+
     log::debug!("complete_ticket: generating test instructions for issue #{issue_id}");
     generate_test_instructions(issue_id, ctx)?;
     Ok(())
 }
 
-pub fn complete_feature(issue_id: u64, ctx: &Context) -> Result<()> {
+pub fn complete_feature(issue_id: u64, ctx: &Context, base_branch: &str) -> Result<()> {
     log::debug!("complete_feature: starting for issue #{issue_id}");
+
+    // For FeatureBranch strategy, create a feature-level branch that child tickets branch from.
+    // For other strategies, children branch from whatever base was passed in.
+    let child_base = match ctx.config.merge_strategy {
+        MergeStrategy::FeatureBranch => {
+            let feature_branch = format!("feature/ticket-{issue_id}");
+            // TODO: when use_worktree is true, provision a git worktree here
+            ctx.source_control.create_branch(&feature_branch, base_branch)?;
+            feature_branch
+        }
+        _ => base_branch.to_string(),
+    };
+
     let initial_children = ctx.issues.get_children(issue_id)?;
     log::debug!("complete_feature: {} initial child issue(s) for #{issue_id}", initial_children.len());
     let initial_ids: std::collections::HashSet<u64> =
         initial_children.iter().map(|i| i.id).collect();
-    execute_ordered(&initial_children, ctx)?;
+    execute_ordered(&initial_children, ctx, &child_base)?;
 
     log::debug!("complete_feature: running feature review for #{issue_id}");
     let has_findings = feature_review(issue_id, ctx)?;
@@ -353,7 +390,7 @@ pub fn complete_feature(issue_id: u64, ctx: &Context) -> Result<()> {
             .filter(|i| !initial_ids.contains(&i.id))
             .collect();
         log::debug!("complete_feature: {} new child issue(s) to process", new_children.len());
-        execute_ordered(&new_children, ctx)?;
+        execute_ordered(&new_children, ctx, &child_base)?;
 
         if feature_review(issue_id, ctx)? {
             log::info!("second feature review still has findings for #{issue_id} — skipping (hitl)");
@@ -367,7 +404,7 @@ pub fn complete_feature(issue_id: u64, ctx: &Context) -> Result<()> {
     Ok(())
 }
 
-pub fn execute_ordered(issues: &[crate::traits::Issue], ctx: &Context) -> Result<()> {
+pub fn execute_ordered(issues: &[crate::traits::Issue], ctx: &Context, base_branch: &str) -> Result<()> {
     log::info!("planning execution order for {} issue(s)", issues.len());
     let ordered_ids = plan_order(issues, ctx)?;
     log::debug!("execute_ordered: order — {:?}", ordered_ids);
@@ -375,8 +412,8 @@ pub fn execute_ordered(issues: &[crate::traits::Issue], ctx: &Context) -> Result
         let issue_type = ctx.issues.issue_type(*id)?;
         log::trace!("execute_ordered: issue #{id} is {}", match issue_type { IssueType::Ticket => "Ticket", IssueType::Feature => "Feature" });
         match issue_type {
-            IssueType::Ticket => complete_ticket(*id, ctx)?,
-            IssueType::Feature => complete_feature(*id, ctx)?,
+            IssueType::Ticket => complete_ticket(*id, ctx, base_branch)?,
+            IssueType::Feature => complete_feature(*id, ctx, base_branch)?,
         }
     }
     Ok(())

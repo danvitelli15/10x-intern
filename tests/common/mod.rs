@@ -127,11 +127,39 @@ impl IssueTracker for FakeIssueTracker {
 
 pub struct FakeSourceControl;
 impl SourceControl for FakeSourceControl {
-    fn create_branch(&self, _name: &str) -> Result<()> { Ok(()) }
+    fn create_branch(&self, _name: &str, _from: &str) -> Result<()> { Ok(()) }
     fn current_branch(&self) -> Result<String> { Ok("main".to_string()) }
     fn diff_from_base(&self, _base: &str) -> Result<String> { Ok(String::new()) }
     fn stage(&self, _paths: Option<&[&str]>) -> Result<()> { Ok(()) }
     fn commit(&self, _message: &str) -> Result<()> { Ok(()) }
+}
+
+/// Records create_branch calls as (name, from) pairs.
+/// Returns a configurable value from current_branch().
+/// Use recording_source_control() to get shared access to the recorded calls.
+pub struct RecordingSourceControl {
+    pub branches_created: Rc<RefCell<Vec<(String, String)>>>,
+    pub current_branch_result: String,
+}
+
+pub fn recording_source_control(current_branch: &str) -> (RecordingSourceControl, Rc<RefCell<Vec<(String, String)>>>) {
+    let branches = Rc::new(RefCell::new(vec![]));
+    let sc = RecordingSourceControl {
+        branches_created: branches.clone(),
+        current_branch_result: current_branch.to_string(),
+    };
+    (sc, branches)
+}
+
+impl SourceControl for RecordingSourceControl {
+    fn create_branch(&self, name: &str, from: &str) -> Result<()> {
+        self.branches_created.borrow_mut().push((name.to_string(), from.to_string()));
+        Ok(())
+    }
+    fn current_branch(&self) -> Result<String> { Ok(self.current_branch_result.clone()) }
+    fn diff_from_base(&self, _: &str) -> Result<String> { Ok(String::new()) }
+    fn stage(&self, _: Option<&[&str]>) -> Result<()> { Ok(()) }
+    fn commit(&self, _: &str) -> Result<()> { Ok(()) }
 }
 
 pub struct FakeRemoteClient;
@@ -244,6 +272,19 @@ pub fn run_config_with_dir(dir: &tempfile::TempDir) -> RunConfig {
         max_iterations: 10,
         merge_strategy: MergeStrategy::Direct,
         base_branch: "main".to_string(),
+        use_worktree: false,
+        dry_run: false,
+        repo_context: String::new(),
+        work_directory: dir.path().to_path_buf(),
+    }
+}
+
+pub fn run_config_with_strategy(dir: &tempfile::TempDir, strategy: MergeStrategy, base_branch: &str) -> RunConfig {
+    RunConfig {
+        max_iterations: 10,
+        merge_strategy: strategy,
+        base_branch: base_branch.to_string(),
+        use_worktree: false,
         dry_run: false,
         repo_context: String::new(),
         work_directory: dir.path().to_path_buf(),
@@ -271,7 +312,7 @@ pub fn make_context_sequenced(tracker: FakeIssueTracker, runner: SequencedRunner
         Box::new(FakeRemoteClient),
         Box::new(runner),
         Box::new(FakeEventSink),
-        RunConfig { max_iterations, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
+        RunConfig { max_iterations, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), use_worktree: false, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
     );
     (ctx, dir)
 }

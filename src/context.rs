@@ -85,6 +85,7 @@ mod tests {
                 max_iterations,
                 merge_strategy: MergeStrategy::Direct,
                 base_branch: "main".to_string(),
+                use_worktree: false,
                 dry_run: false,
                 repo_context: String::new(),
                 work_directory: std::path::PathBuf::from("."),

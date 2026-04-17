@@ -48,7 +48,7 @@ fn complete_feature_executes_children_reviews_and_generates_instructions_when_cl
     ]);
     let (ctx, _dir) = common::make_context_sequenced(tracker, runner, 20);
 
-    complete_feature(99, &ctx).unwrap();
+    complete_feature(99, &ctx, "main").unwrap();
 
     assert!(claimed.borrow().contains(&10));
 }
@@ -80,7 +80,7 @@ fn complete_feature_executes_new_children_after_in_scope_findings() {
     ]);
     let (ctx, _dir) = common::make_context_sequenced(tracker, runner, 30);
 
-    complete_feature(99, &ctx).unwrap();
+    complete_feature(99, &ctx, "main").unwrap();
 
     assert!(claimed.borrow().contains(&10));
     assert!(claimed.borrow().contains(&11));
@@ -112,7 +112,7 @@ fn complete_feature_marks_skipped_when_second_feature_review_still_has_findings(
     ]);
     let (ctx, _dir) = common::make_context_sequenced(tracker, runner, 30);
 
-    complete_feature(99, &ctx).unwrap();
+    complete_feature(99, &ctx, "main").unwrap();
 
     assert!(skipped.borrow().contains(&99));
 }

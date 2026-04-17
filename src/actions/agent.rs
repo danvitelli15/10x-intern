@@ -389,7 +389,7 @@ mod test_support {
             Box::new(StubRemoteClient),
             Box::new(FixedRunner { stdout: stdout.to_string() }),
             Box::new(StubEventSink),
-            RunConfig { max_iterations: 10, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
+            RunConfig { max_iterations: 10, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), use_worktree: false, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
         );
         (ctx, dir)
     }

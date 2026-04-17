@@ -183,6 +183,7 @@ pub struct RunConfig {
     pub max_iterations: u32,
     pub merge_strategy: MergeStrategy,
     pub base_branch: String,
+    pub use_worktree: bool,
     pub dry_run: bool,
     pub repo_context: String,
     pub work_directory: std::path::PathBuf,
@@ -225,7 +226,7 @@ pub trait IssueTracker {
 }
 
 pub trait SourceControl {
-    fn create_branch(&self, name: &str) -> Result<()>;
+    fn create_branch(&self, name: &str, from: &str) -> Result<()>;
     fn current_branch(&self) -> Result<String>;
     fn diff_from_base(&self, base: &str) -> Result<String>;
     /// Stage files before committing.

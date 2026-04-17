@@ -24,14 +24,14 @@ pub fn init_workflow_with_defaults(base_dir: &std::path::Path) -> Result<()> {
 
 pub fn implement_workflow(issue_id: u64, ctx: &Context) -> Result<()> {
     log::info!("starting implement for issue #{issue_id}");
-    complete_ticket(issue_id, ctx)
+    complete_ticket(issue_id, ctx, &ctx.config.base_branch.clone())
 }
 
 pub fn clear_workflow(label: &str, ctx: &Context) -> Result<()> {
     log::info!("fetching issues with label '{label}'");
     let issues = ctx.issues.get_issues_by_label(label)?;
     log::info!("found {} issue(s) to process", issues.len());
-    execute_ordered(&issues, ctx)
+    execute_ordered(&issues, ctx, &ctx.config.base_branch.clone())
 }
 
 pub fn build_context(command: &Command, config: &Config) -> Result<Context> {
@@ -90,6 +90,7 @@ pub fn build_run_config(command: &Command, config: &Config) -> Result<RunConfig>
         max_iterations: max_iterations_override.unwrap_or(config.run.max_iterations),
         merge_strategy,
         base_branch: config.source_control.base_branch.clone(),
+        use_worktree: config.source_control.use_worktree,
         dry_run,
         repo_context: config.resolve_repo_context()?,
         work_directory: config.resolve_work_directory(),

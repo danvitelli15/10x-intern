@@ -76,7 +76,7 @@ fn complete_ticket_runs_implement_review_and_instructions_when_clean() {
     ]);
     let (ctx, _dir) = common::make_context_sequenced(tracker, runner, 10);
 
-    complete_ticket(42, &ctx).unwrap();
+    complete_ticket(42, &ctx, "main").unwrap();
 
     assert_eq!(ctx.iterations_used(), 3);
 }
@@ -93,7 +93,7 @@ fn complete_ticket_loops_when_review_has_findings() {
     ]);
     let (ctx, _dir) = common::make_context_sequenced(tracker, runner, 10);
 
-    complete_ticket(42, &ctx).unwrap();
+    complete_ticket(42, &ctx, "main").unwrap();
 
     assert_eq!(ctx.iterations_used(), 5);
 }
@@ -107,7 +107,7 @@ fn complete_ticket_marks_skipped_when_budget_exhausted() {
     ]);
     let (ctx, _dir) = common::make_context_sequenced(tracker, runner, 1);
 
-    complete_ticket(42, &ctx).unwrap();
+    complete_ticket(42, &ctx, "main").unwrap();
 
     assert!(skipped.borrow().contains(&42));
 }

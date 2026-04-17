@@ -43,12 +43,21 @@ impl AgentRunner for LocalRunner {
 
         match self.runner.run("claude", &args) {
             Ok(stdout) => {
-                log::debug!("runner: claude succeeded ({} chars of output)", stdout.len());
-                Ok(AgentOutput { stdout, success: true })
+                log::debug!(
+                    "runner: claude succeeded ({} chars of output)",
+                    stdout.len()
+                );
+                Ok(AgentOutput {
+                    stdout,
+                    success: true,
+                })
             }
             Err(e) => {
                 log::info!("runner: claude invocation failed: {e}");
-                Ok(AgentOutput { stdout: String::new(), success: false })
+                Ok(AgentOutput {
+                    stdout: String::new(),
+                    success: false,
+                })
             }
         }
     }
@@ -67,6 +76,7 @@ mod tests {
             max_iterations: 10,
             merge_strategy: MergeStrategy::Direct,
             base_branch: "main".to_string(),
+            use_worktree: false,
             dry_run,
             repo_context: String::new(),
             work_directory: std::path::PathBuf::from("."),
