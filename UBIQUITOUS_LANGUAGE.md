@@ -54,24 +54,28 @@
 | **Complete** | An issue whose implementation was accepted by the review action | Done, resolved, closed |
 | **Skipped** | An issue the agent abandoned, typically due to budget exhaustion or a second failed feature review | Abandoned, failed |
 
-## Source control
+## Source control — branching
 
 | Term | Definition | Aliases to avoid |
 |---|---|---|
-| **Merge strategy** *(new)* | Config value that controls branch topology and PR lifecycle for a run — one of `Direct`, `PerTicket`, or `FeatureBranch` | Commit strategy (old name — avoid), integration strategy |
-| **Direct** *(new)* | A **merge strategy** where the agent works on the current branch with no new branch created and no PR opened | — |
-| **PerTicket** *(new)* | A **merge strategy** where each ticket gets its own branch and its own PR | — |
-| **FeatureBranch** *(new)* | A **merge strategy** where all tickets in an `execute_ordered` run share one branch; a single PR is opened after all tickets complete | — |
-| **Base branch** *(new)* | The branch a working branch is forked from, used as the base for `diff_from_base` in review — configured in `[source_control]` | Main, master, trunk |
-| **Setup workspace** *(new)* | The precursor **behavior** step that prepares the working environment before implementation begins — a no-op today, will provision **worktrees** in future | Workspace init, branch setup |
-| **Worktree** *(new)* | A `git worktree`-isolated working directory for a single ticket run — planned but not yet implemented | Workspace, working copy |
-| **PR step** *(new)* | The terminal phase of `complete_ticket` that opens a pull request — may be suppressed when called from `execute_ordered` under `FeatureBranch` | Create PR |
+| **Merge strategy** | Config value that controls branch topology and PR lifecycle for a run — one of `Direct`, `PerTicket`, or `FeatureBranch` | Commit strategy (old name — avoid), integration strategy |
+| **Direct** | A **merge strategy** where the agent works on the current branch with no new branch created and no PR opened | — |
+| **PerTicket** | A **merge strategy** where each ticket gets its own branch (forked from **base branch**) and its own PR back into the base | — |
+| **FeatureBranch** | A **merge strategy** where a feature issue gets a branch, each child ticket gets its own branch forked from the feature branch, and every branch gets a PR into its parent — forming a recursive branch hierarchy | — |
+| **Recursive branching** | The topology produced by `FeatureBranch`: child branches target the feature branch, which targets the base branch, allowing arbitrary depth without special-casing | — |
+| **Base branch** | The branch a working branch is forked from, used as the merge target for PRs and the base for `diff_from_base` in review — configured in `[source_control]` | Main, master, trunk |
+| **Setup workspace** | The precursor behavior step that prepares the working environment before implementation begins — creates a branch in `PerTicket`/`FeatureBranch`, no-op in `Direct`, will provision **worktrees** in future | Workspace init, branch setup |
+| **Worktree** | A `git worktree`-isolated working directory for a single ticket run — planned but not yet implemented | Workspace, working copy |
+| **PR step** | The terminal phase of `complete_ticket` (and `complete_feature` under `FeatureBranch`) that opens a pull request for the current branch — fires automatically whenever a branch was created; never fires under `Direct` | Create PR |
 
-## Result signals — source control *(new)*
+## Source control — dirty state
 
 | Term | Definition | Aliases to avoid |
 |---|---|---|
-| **branchCreated** *(new)* | An `<branchCreated>…</branchCreated>` tag emitted by the agent in its output, naming the branch it created — used as a fallback when `current_branch()` returns something unexpected | Branch signal, branch tag |
+| **Dirty state** | The condition after implementation where the working tree has uncommitted changes, no commits, or both | Unclean, uncommitted |
+| **DirtyBehavior** | A config-level enum (`Fail` / `Warn` / `Commit`) that governs the orchestrator's response to a specific dirty state axis | Dirty policy, dirty mode |
+| **on_dirty_no_commits** | Config axis: the `DirtyBehavior` applied when the agent made zero commits after implementation — signals the agent did no useful work | — |
+| **on_dirty_after_commit** | Config axis: the `DirtyBehavior` applied when the agent committed at least once but left uncommitted changes behind | — |
 
 ## Configuration
 
@@ -91,25 +95,26 @@
 - An **Override** shadows the **Scaffold** for a specific prompt name; if no override exists, the behavior errors and instructs the user to run `intern init`
 - A **Ticket** produces a **FINDINGS** or **CLEAN** signal from the review **Action**
 - A **Feature** produces an **IN_SCOPE_FINDINGS** or **CLEAN** signal from the feature review **Action**
-- **Setup workspace** precedes `implement` in every **behavior** that calls it
-- Under `FeatureBranch`, `execute_ordered` suppresses the **PR step** per ticket and opens one PR after all tickets complete
-- The agent emits a **branchCreated** tag; the orchestrator validates it against `current_branch()` post-implement
+- **Setup workspace** precedes `implement` in every behavior that calls it
+- Under **FeatureBranch**, each child **Ticket** opens a PR into the feature branch; the feature itself opens a PR into the **base branch** — this is **recursive branching**
+- Under **PerTicket**, each **Ticket** opens a PR into the **base branch** directly; no feature-level PR exists
+- Under **Direct**, no branch is created and no PR is opened, regardless of any other config
+- `on_dirty_no_commits` fires whenever the agent made zero commits, regardless of tree cleanliness; `on_dirty_after_commit` fires only when commits exist but the tree is also dirty
 - **Merge strategy** and **base branch** are configured together in `[source_control]`
 
 ## Example dialogue
 
-> **Dev:** "So the `clear` subcommand calls `complete_ticket` directly?"
-> **Domain expert:** "No — the **subcommand** triggers the `clear` **workflow**, which calls `execute_ordered`, which calls `complete_ticket`. The **subcommand** doesn't know about `complete_ticket` at all."
-> **Dev:** "And `complete_ticket` — is that a **behavior** or a **workflow**?"
-> **Domain expert:** "A **behavior**. It groups the `implement`, `review`, and `generate_test_instructions` **actions** together. It's composable — `execute_ordered` calls it, and so does `complete_feature`. No **subcommand** calls it directly."
-> **Dev:** "What about `init`? That's both a **subcommand** and a function name."
-> **Domain expert:** "The **subcommand** triggers `init_workflow`. That workflow calls `scaffold_intern_directory`, which is the **behavior**. Today there's one behavior in that workflow. When we add the interactive config wizard, that becomes a second **behavior** in the same `init` **workflow** — the **subcommand** doesn't change."
-> **Dev:** "So the rule is: **subcommands** map to **workflows**, **workflows** compose **behaviors**, **behaviors** compose **actions**?"
-> **Domain expert:** "Exactly. And **behaviors** can also compose other **behaviors** — `complete_feature` calls `execute_ordered`, which calls `complete_ticket`. All of that is the **behavior** layer."
+> **Dev:** "Under `FeatureBranch`, does `execute_ordered` suppress the **PR step** per ticket?"
+> **Domain expert:** "No — each ticket still opens a PR. But the PR targets the *feature branch*, not main. The **recursive branching** model means every completed branch, at any level, gets a PR into its parent."
+> **Dev:** "So if feature #99 has children #10 and #11, we get three PRs?"
+> **Domain expert:** "Exactly. `feature/ticket-10` → `feature/ticket-99`, `feature/ticket-11` → `feature/ticket-99`, then `feature/ticket-99` → main. Three branches, three PRs."
+> **Dev:** "What happens if the agent leaves uncommitted changes?"
+> **Domain expert:** "Depends on which axis. If it made commits but left extra files behind, `on_dirty_after_commit` governs: `Fail` halts the run, `Warn` logs and continues, `Commit` stages everything and commits. If it made *zero* commits at all, that's a different signal — `on_dirty_no_commits` governs that one independently."
+> **Dev:** "Why two axes instead of one?"
+> **Domain expert:** "Zero commits is a stronger signal than leftover changes. You might tolerate a stray file but still want to fail-fast if the agent did nothing. The two-axis config lets you tune them independently."
 
 ## Flagged ambiguities
 
-- **"issue" vs "ticket"**: Both are valid. **Ticket** is the broader colloquial term for any documented work item (in this project or a target repo). **Issue** is the GitHub-specific representation. In the codebase, `Ticket` as an `IssueType` variant means a leaf node — distinct from `Feature`. Context resolves the ambiguity.
+- **"issue" vs "ticket"**: Both are valid. **Ticket** is the broader colloquial term for any documented work item. **Issue** is the GitHub-specific representation. In the codebase, `Ticket` as an `IssueType` variant means a leaf node — distinct from `Feature`. Context resolves the ambiguity.
 - **"command" vs "subcommand"**: Use **subcommand** — `intern` is the binary, `implement`/`clear`/`init` are subcommands. "Command" is too broad.
-- **"commit_strategy" vs "merge_strategy"**: The config field is being renamed from `commit_strategy` to `merge_strategy`. Avoid `commit_strategy` going forward — it conflates commit frequency (owned by the agent) with branch topology (owned by the orchestrator). Use **merge strategy**.
-- **"integration_strategy"**: Was considered as a rename candidate for `commit_strategy`. Rejected in favour of **merge strategy**. Do not use.
+- **"commit_strategy"**: Renamed to **merge strategy** — the rename is complete. Do not use `commit_strategy`; it conflated commit frequency (owned by the agent) with branch topology (owned by the orchestrator).

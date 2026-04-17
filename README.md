@@ -5,11 +5,13 @@ Autonomous ticket execution for repos with well-documented, architecturally soun
 ## How it works
 
 `intern` reads a GitHub issue, breaks it into sub-issues, plans an implementation order,
-dispatches an AI agent to implement each one, and runs a review pass when done.
+dispatches an AI agent to implement each one, runs a review pass when done, and opens a pull
+request for the completed work.
 
 Each step maps to a configurable adapter:
 
 - **Issue tracker** — fetches issues and posts results (currently: GitHub)
+- **Source control** — creates branches, checks dirty state, opens PRs (currently: Git + `gh`)
 - **Agent runner** — executes implementation and review (currently: Claude Code, run locally)
 
 The architecture is designed so these adapters can be swapped out. Future versions may support
@@ -53,20 +55,27 @@ This scaffolds `.intern/config.toml` and default prompt files under `.intern/pro
 Edit `.intern/config.toml`:
 
 ```toml
-# context_file = "CLAUDE.md"      # optional: repo context injected into every agent run
-# work_directory = "."             # optional: override working directory
+# context_file = "CLAUDE.md"        # path to repo context file (e.g. CLAUDE.md, AGENTS.md)
+# work_directory = "."               # override the working directory for .intern/ lookups
 
 [issue_tracker]
 kind = "github"
-repo = "owner/repo"                # your repo in owner/repo format
+repo = "owner/repo"                  # replace with your repo in owner/repo format
+
+[source_control]
+kind = "git"
+base_branch = "main"                 # branch new work is forked from
+merge_strategy = "feature-branch"   # direct | per-ticket | feature-branch
+use_worktree = false
+on_dirty_after_commit = "warn"       # fail | warn | commit
+on_dirty_no_commits = "fail"         # fail | warn | commit
 
 [agent]
 kind = "local"
-# settings_file = ".claude/settings.json"
+# settings_file = ".claude/settings.json"  # optional: path to Claude Code settings file
 
 [run]
 max_iterations = 100
-commit_strategy = "feature-branch"
 ```
 
 ### Config reference
@@ -77,10 +86,23 @@ commit_strategy = "feature-branch"
 | `work_directory` | no | CWD | Working directory for agent runs |
 | `issue_tracker.kind` | yes | — | Issue tracker adapter. Currently: `github` |
 | `issue_tracker.repo` | yes | — | Repository in `owner/repo` format |
+| `source_control.kind` | no | `git` | Source control adapter. Currently: `git` |
+| `source_control.base_branch` | no | `main` | Branch new work is forked from; PR target for top-level branches |
+| `source_control.merge_strategy` | no | `feature-branch` | `direct` · `per-ticket` · `feature-branch` — controls branch topology and PR creation |
+| `source_control.use_worktree` | no | `false` | Provision a `git worktree` per ticket run (planned — not yet active) |
+| `source_control.on_dirty_after_commit` | no | `warn` | `fail` · `warn` · `commit` — response when agent committed but left uncommitted changes |
+| `source_control.on_dirty_no_commits` | no | `fail` | `fail` · `warn` · `commit` — response when agent made zero commits after implementation |
 | `agent.kind` | yes | — | Agent runner. Currently: `local` |
 | `agent.settings_file` | no | — | Path to a Claude Code settings file passed via `--settings` |
 | `run.max_iterations` | no | `100` | Max agent invocations per run |
-| `run.commit_strategy` | no | `feature-branch` | `direct` · `feature-branch` · `per-ticket` |
+
+#### Merge strategies
+
+| Strategy | Branches | PRs |
+|---|---|---|
+| `direct` | None — works on current branch | None |
+| `per-ticket` | One branch per ticket, forked from `base_branch` | One PR per ticket into `base_branch` |
+| `feature-branch` | Feature branch + one branch per child ticket | Each branch gets a PR into its parent branch (recursive) |
 
 ## Commands
 
@@ -92,7 +114,7 @@ Implements a GitHub issue and its sub-issues.
 intern implement 42
 intern implement 42 --dry-run
 intern implement 42 --max-iterations 50
-intern implement 42 --commit-strategy direct
+intern implement 42 --merge-strategy direct
 ```
 
 ### `intern clear <label>`
