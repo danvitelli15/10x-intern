@@ -18,14 +18,24 @@ pub fn plan_order(issues: &[Issue], ctx: &Context) -> Result<Vec<u64>> {
 
 #[cfg(test)]
 mod plan_order_tests {
-    use super::*;
     use super::test_support::test_context;
+    use super::*;
 
     #[test]
     fn plan_order_parses_agent_json_into_ordered_ids() {
         let issues = vec![
-            Issue { id: 1, title: "First".into(), body: "".into(), labels: vec![] },
-            Issue { id: 2, title: "Second".into(), body: "".into(), labels: vec![] },
+            Issue {
+                id: 1,
+                title: "First".into(),
+                body: "".into(),
+                labels: vec![],
+            },
+            Issue {
+                id: 2,
+                title: "Second".into(),
+                body: "".into(),
+                labels: vec![],
+            },
         ];
         let (ctx, _dir) = test_context(r#"[{"id": 2}, {"id": 1}]"#);
         let order = plan_order(&issues, &ctx).unwrap();
@@ -34,7 +44,12 @@ mod plan_order_tests {
 
     #[test]
     fn plan_order_returns_error_for_invalid_json() {
-        let issues = vec![Issue { id: 1, title: "T".into(), body: "".into(), labels: vec![] }];
+        let issues = vec![Issue {
+            id: 1,
+            title: "T".into(),
+            body: "".into(),
+            labels: vec![],
+        }];
         let (ctx, _dir) = test_context("I think issue 2 should go first, then issue 1.");
         assert!(plan_order(&issues, &ctx).is_err());
     }
@@ -52,18 +67,24 @@ pub fn implement(issue_id: u64, ctx: &Context) -> Result<()> {
 
     log::info!("claiming issue #{issue_id}");
     ctx.issues.claim_issue(issue_id)?;
-    ctx.events.emit(crate::traits::Event::AgentStarted(issue_id));
+    ctx.events
+        .emit(crate::traits::Event::AgentStarted(issue_id));
 
     log::debug!("implement: building prompt for issue #{issue_id}");
-    let prompt = build_implement_prompt(&issue, &ctx.config.repo_context, &ctx.config.work_directory)?;
+    let prompt =
+        build_implement_prompt(&issue, &ctx.config.repo_context, &ctx.config.work_directory)?;
     log::debug!("implement: running agent for issue #{issue_id}");
     let output = ctx.run_agent(&prompt)?;
-    log::trace!("implement: agent returned success={} for issue #{issue_id}", output.success);
+    log::trace!(
+        "implement: agent returned success={} for issue #{issue_id}",
+        output.success
+    );
 
     if output.success {
         log::info!("issue #{issue_id} implemented successfully");
         ctx.issues.complete_issue(issue_id)?;
-        ctx.events.emit(crate::traits::Event::IssueComplete(issue_id));
+        ctx.events
+            .emit(crate::traits::Event::IssueComplete(issue_id));
     } else {
         log::info!("agent did not succeed for issue #{issue_id}");
     }
@@ -79,15 +100,20 @@ pub fn review(issue_id: u64, ctx: &Context) -> Result<bool> {
     log::trace!("review: diff is {} bytes", diff.len());
     let prompt = build_review_prompt(&issue, &diff, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
-    let has_findings = output.stdout.contains("<reviewResult>FINDINGS</reviewResult>");
-    log::debug!("review: issue #{issue_id} — {}", if has_findings { "FINDINGS" } else { "CLEAN" });
+    let has_findings = output
+        .stdout
+        .contains("<reviewResult>FINDINGS</reviewResult>");
+    log::debug!(
+        "review: issue #{issue_id} — {}",
+        if has_findings { "FINDINGS" } else { "CLEAN" }
+    );
     Ok(has_findings)
 }
 
 #[cfg(test)]
 mod review_tests {
-    use super::*;
     use super::test_support::test_context;
+    use super::*;
 
     #[test]
     fn review_returns_true_when_agent_outputs_findings() {
@@ -115,25 +141,37 @@ pub fn feature_review(issue_id: u64, ctx: &Context) -> Result<bool> {
     log::trace!("feature_review: diff is {} bytes", diff.len());
     let prompt = build_feature_review_prompt(&issue, &diff, &ctx.config.work_directory)?;
     let output = ctx.run_agent(&prompt)?;
-    let has_findings = output.stdout.contains("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>");
-    log::debug!("feature_review: issue #{issue_id} — {}", if has_findings { "IN_SCOPE_FINDINGS" } else { "CLEAN" });
+    let has_findings = output
+        .stdout
+        .contains("<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>");
+    log::debug!(
+        "feature_review: issue #{issue_id} — {}",
+        if has_findings {
+            "IN_SCOPE_FINDINGS"
+        } else {
+            "CLEAN"
+        }
+    );
     Ok(has_findings)
 }
 
 #[cfg(test)]
 mod feature_review_tests {
-    use super::*;
     use super::test_support::test_context;
+    use super::*;
 
     #[test]
     fn feature_review_returns_true_when_agent_outputs_in_scope_findings() {
-        let (ctx, _dir) = test_context("Analysis...\n<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>");
+        let (ctx, _dir) = test_context(
+            "Analysis...\n<featureReviewResult>IN_SCOPE_FINDINGS</featureReviewResult>",
+        );
         assert!(feature_review(1, &ctx).unwrap());
     }
 
     #[test]
     fn feature_review_returns_false_when_agent_outputs_clean() {
-        let (ctx, _dir) = test_context("Looks good.\n<featureReviewResult>CLEAN</featureReviewResult>");
+        let (ctx, _dir) =
+            test_context("Looks good.\n<featureReviewResult>CLEAN</featureReviewResult>");
         assert!(!feature_review(1, &ctx).unwrap());
     }
 
@@ -142,6 +180,15 @@ mod feature_review_tests {
         let (ctx, _dir) = test_context("I found IN_SCOPE_FINDINGS in the codebase.");
         assert!(!feature_review(1, &ctx).unwrap());
     }
+}
+
+pub fn create_pr(issue_id: u64, ctx: &Context, branch: &str) -> Result<String> {
+    // TODO: future: run an agent action to generate tailored PR copy rather than mirroring the issue
+    log::debug!("create_pr: opening PR for issue #{issue_id} from branch '{branch}'");
+    let issue = ctx.issues.get_issue(issue_id)?;
+    let url = ctx.remote.create_pr(&issue.title, &issue.body, branch)?;
+    log::info!("create_pr: PR opened for issue #{issue_id} — {url}");
+    Ok(url)
 }
 
 pub fn generate_test_instructions(issue_id: u64, ctx: &Context) -> Result<()> {
@@ -213,8 +260,8 @@ fn load_prompt(base_dir: &Path, name: &str) -> Result<String> {
 
 #[cfg(test)]
 mod load_prompt_tests {
-    use super::*;
     use super::test_support::make_prompt_dir_with;
+    use super::*;
 
     #[test]
     fn load_prompt_uses_override_file_when_present() {
@@ -238,8 +285,11 @@ mod load_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         let prompts_dir = dir.path().join(".intern/prompts");
         std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("implement.md"),
-            "<strip-before-prompting>\n# docs\n</strip-before-prompting>\n\nContent.").unwrap();
+        std::fs::write(
+            prompts_dir.join("implement.md"),
+            "<strip-before-prompting>\n# docs\n</strip-before-prompting>\n\nContent.",
+        )
+        .unwrap();
         let result = load_prompt(dir.path(), "implement").unwrap();
         assert!(!result.contains("# docs"));
         assert!(result.contains("Content."));
@@ -247,7 +297,10 @@ mod load_prompt_tests {
 
     #[test]
     fn scaffold_implement_loads_and_strips_cleanly() {
-        let dir = make_prompt_dir_with("implement", include_str!("../../scaffold/prompts/implement.md"));
+        let dir = make_prompt_dir_with(
+            "implement",
+            include_str!("../../scaffold/prompts/implement.md"),
+        );
         let result = load_prompt(dir.path(), "implement").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
@@ -266,7 +319,10 @@ mod load_prompt_tests {
         );
         // Commits should be encouraged during implementation, not only at the very end
         assert!(
-            stripped.to_lowercase().contains("as you") || stripped.to_lowercase().contains("each ") || stripped.to_lowercase().contains("incremental") || stripped.to_lowercase().contains("logical"),
+            stripped.to_lowercase().contains("as you")
+                || stripped.to_lowercase().contains("each ")
+                || stripped.to_lowercase().contains("incremental")
+                || stripped.to_lowercase().contains("logical"),
             "implement prompt should encourage committing during implementation, not just at the end"
         );
     }
@@ -277,7 +333,9 @@ mod load_prompt_tests {
         let dir = make_prompt_dir_with("implement", raw);
         let stripped = load_prompt(dir.path(), "implement").unwrap();
         assert!(
-            !stripped.to_lowercase().contains("create.*branch") && !stripped.contains("switch -c") && !stripped.contains("git branch"),
+            !stripped.to_lowercase().contains("create.*branch")
+                && !stripped.contains("switch -c")
+                && !stripped.contains("git branch"),
             "implement prompt must not instruct the agent to create branches — that is the orchestrator's job"
         );
     }
@@ -291,7 +349,8 @@ mod load_prompt_tests {
             "implement prompt docs should mention that overriding the prompt means owning VCS commit instructions"
         );
         assert!(
-            raw.to_lowercase().contains("commit") && (raw.contains("override") || raw.contains("custom")),
+            raw.to_lowercase().contains("commit")
+                && (raw.contains("override") || raw.contains("custom")),
             "implement prompt docs should warn about commit responsibility when overriding"
         );
     }
@@ -307,7 +366,10 @@ mod load_prompt_tests {
 
     #[test]
     fn scaffold_feature_review_loads_and_strips_cleanly() {
-        let dir = make_prompt_dir_with("feature_review", include_str!("../../scaffold/prompts/feature_review.md"));
+        let dir = make_prompt_dir_with(
+            "feature_review",
+            include_str!("../../scaffold/prompts/feature_review.md"),
+        );
         let result = load_prompt(dir.path(), "feature_review").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
@@ -316,7 +378,10 @@ mod load_prompt_tests {
 
     #[test]
     fn scaffold_plan_order_loads_and_strips_cleanly() {
-        let dir = make_prompt_dir_with("plan_order", include_str!("../../scaffold/prompts/plan_order.md"));
+        let dir = make_prompt_dir_with(
+            "plan_order",
+            include_str!("../../scaffold/prompts/plan_order.md"),
+        );
         let result = load_prompt(dir.path(), "plan_order").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
@@ -325,7 +390,10 @@ mod load_prompt_tests {
 
     #[test]
     fn scaffold_test_instructions_loads_and_strips_cleanly() {
-        let dir = make_prompt_dir_with("test_instructions", include_str!("../../scaffold/prompts/test_instructions.md"));
+        let dir = make_prompt_dir_with(
+            "test_instructions",
+            include_str!("../../scaffold/prompts/test_instructions.md"),
+        );
         let result = load_prompt(dir.path(), "test_instructions").unwrap();
         assert!(!result.contains("<strip-before-prompting>"));
         assert!(!result.contains("Available variables"));
@@ -333,7 +401,11 @@ mod load_prompt_tests {
     }
 }
 
-fn build_implement_prompt(issue: &Issue, repo_context: &str, work_directory: &Path) -> Result<String> {
+fn build_implement_prompt(
+    issue: &Issue,
+    repo_context: &str,
+    work_directory: &Path,
+) -> Result<String> {
     let template = load_prompt(work_directory, "implement")?;
     Ok(template
         .replace("{{issue_id}}", &issue.id.to_string())
@@ -344,21 +416,32 @@ fn build_implement_prompt(issue: &Issue, repo_context: &str, work_directory: &Pa
 
 #[cfg(test)]
 mod build_implement_prompt_tests {
-    use super::*;
     use super::test_support::make_prompt_dir_with;
+    use super::*;
 
     #[test]
     fn implement_prompt_includes_repo_context() {
         let dir = make_prompt_dir_with("implement", "{{repo_context}}\n{{issue_id}}");
-        let issue = Issue { id: 1, title: "T".into(), body: "B".into(), labels: vec![] };
-        let prompt = build_implement_prompt(&issue, "use snake_case everywhere", dir.path()).unwrap();
+        let issue = Issue {
+            id: 1,
+            title: "T".into(),
+            body: "B".into(),
+            labels: vec![],
+        };
+        let prompt =
+            build_implement_prompt(&issue, "use snake_case everywhere", dir.path()).unwrap();
         assert!(prompt.contains("use snake_case everywhere"));
     }
 
     #[test]
     fn implement_prompt_with_empty_repo_context_does_not_panic() {
         let dir = make_prompt_dir_with("implement", "{{repo_context}}\n{{issue_id}}");
-        let issue = Issue { id: 1, title: "T".into(), body: "B".into(), labels: vec![] };
+        let issue = Issue {
+            id: 1,
+            title: "T".into(),
+            body: "B".into(),
+            labels: vec![],
+        };
         let prompt = build_implement_prompt(&issue, "", dir.path()).unwrap();
         assert!(!prompt.is_empty());
     }
@@ -366,7 +449,8 @@ mod build_implement_prompt_tests {
 
 fn build_plan_order_prompt(issues: &[Issue], work_directory: &Path) -> Result<String> {
     let template = load_prompt(work_directory, "plan_order")?;
-    let issues_list = issues.iter()
+    let issues_list = issues
+        .iter()
         .map(|i| format!("### Issue #{}: {}\n{}", i.id, i.title, i.body))
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -391,7 +475,11 @@ fn build_review_prompt(issue: &Issue, diff: &str, work_directory: &Path) -> Resu
         .replace("{{diff}}", diff))
 }
 
-fn build_test_instructions_prompt(issue: &Issue, diff: &str, work_directory: &Path) -> Result<String> {
+fn build_test_instructions_prompt(
+    issue: &Issue,
+    diff: &str,
+    work_directory: &Path,
+) -> Result<String> {
     let template = load_prompt(work_directory, "test_instructions")?;
     Ok(template
         .replace("{{issue_id}}", &issue.id.to_string())
@@ -406,10 +494,15 @@ mod test_support {
     use crate::test_utils::{StubEventSink, StubIssueTracker, StubRemoteClient, StubSourceControl};
     use crate::traits::{AgentOutput, AgentRunner, MergeStrategy, RunConfig};
 
-    pub struct FixedRunner { pub stdout: String }
+    pub struct FixedRunner {
+        pub stdout: String,
+    }
     impl AgentRunner for FixedRunner {
         fn run(&self, _: &str, _: &RunConfig) -> anyhow::Result<AgentOutput> {
-            Ok(AgentOutput { stdout: self.stdout.clone(), success: true })
+            Ok(AgentOutput {
+                stdout: self.stdout.clone(),
+                success: true,
+            })
         }
     }
 
@@ -417,7 +510,13 @@ mod test_support {
         let dir = tempfile::tempdir().unwrap();
         let prompts_dir = dir.path().join(".intern/prompts");
         std::fs::create_dir_all(&prompts_dir).unwrap();
-        for name in &["implement", "review", "feature_review", "plan_order", "test_instructions"] {
+        for name in &[
+            "implement",
+            "review",
+            "feature_review",
+            "plan_order",
+            "test_instructions",
+        ] {
             std::fs::write(prompts_dir.join(format!("{name}.md")), "{{issue_id}} {{issue_title}} {{issue_body}} {{diff}} {{issues_list}} {{repo_context}}").unwrap();
         }
         dir
@@ -429,9 +528,21 @@ mod test_support {
             Box::new(StubIssueTracker),
             Box::new(StubSourceControl),
             Box::new(StubRemoteClient),
-            Box::new(FixedRunner { stdout: stdout.to_string() }),
+            Box::new(FixedRunner {
+                stdout: stdout.to_string(),
+            }),
             Box::new(StubEventSink),
-            RunConfig { max_iterations: 10, merge_strategy: MergeStrategy::Direct, base_branch: "main".to_string(), use_worktree: false, dry_run: false, repo_context: String::new(), work_directory: dir.path().to_path_buf() },
+            RunConfig {
+                max_iterations: 10,
+                merge_strategy: MergeStrategy::Direct,
+                base_branch: "main".to_string(),
+                use_worktree: false,
+                on_dirty_after_commit: crate::traits::DirtyBehavior::Warn,
+                on_dirty_no_commits: crate::traits::DirtyBehavior::Fail,
+                dry_run: false,
+                repo_context: String::new(),
+                work_directory: dir.path().to_path_buf(),
+            },
         );
         (ctx, dir)
     }

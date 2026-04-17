@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::actions::{
-    create_file, detect_repo_slug, feature_review, find_file, generate_test_instructions,
+    create_file, create_pr, detect_repo_slug, feature_review, find_file, generate_test_instructions,
     implement, plan_order, review,
 };
 use crate::context::{BudgetExhausted, Context};
@@ -389,13 +389,14 @@ pub fn complete_ticket(issue_id: u64, ctx: &Context, base_branch: &str) -> Resul
 
     check_dirty_state(issue_id, base_branch, ctx)?;
 
-    if let Some(expected) = expected_branch {
+    if let Some(ref expected) = expected_branch {
         let actual = ctx.source_control.current_branch()?;
-        if actual != expected {
+        if actual != *expected {
             anyhow::bail!(
                 "branch mismatch after implement: expected '{expected}', got '{actual}'"
             );
         }
+        create_pr(issue_id, ctx, expected)?;
     }
 
     log::debug!("complete_ticket: generating test instructions for issue #{issue_id}");
@@ -441,6 +442,10 @@ pub fn complete_feature(issue_id: u64, ctx: &Context, base_branch: &str) -> Resu
             ctx.issues.skip_issue(issue_id)?;
             return Ok(());
         }
+    }
+
+    if let MergeStrategy::FeatureBranch = ctx.config.merge_strategy {
+        create_pr(issue_id, ctx, &child_base)?;
     }
 
     log::debug!("complete_feature: generating test instructions for #{issue_id}");

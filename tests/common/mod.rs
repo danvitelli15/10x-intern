@@ -206,6 +206,24 @@ impl RemoteClient for FakeRemoteClient {
     }
 }
 
+pub struct RecordingRemoteClient {
+    pub calls: Rc<RefCell<Vec<String>>>,
+}
+
+impl RecordingRemoteClient {
+    pub fn new() -> (Self, Rc<RefCell<Vec<String>>>) {
+        let calls = Rc::new(RefCell::new(vec![]));
+        (Self { calls: calls.clone() }, calls)
+    }
+}
+
+impl RemoteClient for RecordingRemoteClient {
+    fn create_pr(&self, _title: &str, _body: &str, branch: &str) -> Result<String> {
+        self.calls.borrow_mut().push(branch.to_string());
+        Ok(format!("https://github.com/example/repo/pull/{}", self.calls.borrow().len()))
+    }
+}
+
 pub struct FakeEventSink;
 impl EventSink for FakeEventSink {
     fn emit(&self, _event: Event) {}
