@@ -77,6 +77,8 @@ mod tests {
             merge_strategy: MergeStrategy::Direct,
             base_branch: "main".to_string(),
             use_worktree: false,
+            on_dirty_after_commit: crate::traits::DirtyBehavior::Warn,
+            on_dirty_no_commits: crate::traits::DirtyBehavior::Fail,
             dry_run,
             repo_context: String::new(),
             work_directory: std::path::PathBuf::from("."),
